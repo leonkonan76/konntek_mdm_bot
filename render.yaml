@@ -2,7 +2,12 @@ services:
   - type: web
     name: konntek-mdm-bot
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    pythonVersion: "3.12.4"
+    buildCommand: |
+      pip install --upgrade pip
+      pip install numpy==1.26.4 --only-binary=:all:
+      pip install pandas==2.0.3 --only-binary=:all:
+      pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
