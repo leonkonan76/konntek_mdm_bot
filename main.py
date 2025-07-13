@@ -1,4 +1,4 @@
-# main.py (version avec menu interactif complet)
+# main.py (version corrigée avec fonctions admin)
 import os
 import logging
 from datetime import datetime
@@ -444,8 +444,114 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Erreur critique. Utilisez /start pour réinitialiser.")
         return ConversationHandler.END
 
-# [Les fonctions admin_command, list_targets, delete_target, export_logs restent inchangées]
-# ... (garder le même code que précédemment pour ces fonctions)
+# AJOUT DES FONCTIONS ADMIN MANQUANTES
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche le panel d'administration"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Accès refusé.")
+        return
+    
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "🛠️ Panel Admin - Sélectionnez une option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
+
+async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche la liste des cibles enregistrées"""
+    targets = file_manager.list_devices(DATA_PATH)
+    
+    if targets:
+        response = "📋 Cibles enregistrées:\n" + "\n".join([f"- {t}" for t in targets])
+    else:
+        response = "ℹ️ Aucune cible enregistrée."
+    
+    await update.message.reply_text(response)
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
+
+async def delete_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Supprime une cible spécifique"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Accès refusé.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /delete_target <id>")
+        return
+    
+    target_id = context.args[0]
+    if file_manager.delete_device_folder(target_id):
+        database.delete_device(DB_NAME, target_id)
+        await update.message.reply_text(f"✅ Cible {target_id} supprimée.")
+    else:
+        await update.message.reply_text(f"❌ Erreur lors de la suppression de {target_id}.")
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
+
+async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exporte les logs d'une cible spécifique"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Accès refusé.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /export <id> [csv|pdf]")
+        return
+    
+    target_id = context.args[0]
+    format_type = context.args[1] if len(context.args) > 1 else "csv"
+    
+    try:
+        if format_type == "csv":
+            filename = report_generator.generate_csv(DB_NAME, target_id)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=open(filename, 'rb'),
+                filename=f"{target_id}_logs.csv"
+            )
+        elif format_type == "pdf":
+            filename = report_generator.generate_pdf(DB_NAME, target_id)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=open(filename, 'rb'),
+                filename=f"{target_id}_report.pdf"
+            )
+        else:
+            await update.message.reply_text("❌ Format non supporté. Utilisez 'csv' ou 'pdf'.")
+            return
+    except Exception as e:
+        logger.error(f"Erreur lors de l'export: {str(e)}")
+        await update.message.reply_text("❌ Erreur lors de la génération du rapport.")
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Annule la conversation et réinitialise complètement"""
