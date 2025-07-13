@@ -15,6 +15,9 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DATABASE_PATH = "konntek_mdm.db"
 DATA_ROOT = "data"
+# Vérification que le token existe
+if not BOT_TOKEN:
+    raise ValueError("⚠️ BOT_TOKEN est vide ou non défini. Vérifie Render > Environment.")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
