@@ -1,101 +1,55 @@
+# konntek_mdm_bot - Bot Telegram MDM avec base de données, menu interactif et admin sécurisé
+
 import os
 import logging
 import sqlite3
 import time
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or "ton_token_ici"
+# Liste des administrateurs Telegram autorisés (à personnaliser)
+ADMIN_IDS = [
+  465520526  ]
+
+telegram_available = True
+try:
+    from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+    from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+except ModuleNotFoundError:
+    print("⚠️ Module 'telegram' introuvable. Veuillez installer python-telegram-bot pour exécuter ce script.")
+    telegram_available = False
+
+# Configuration du bot
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_PATH = "konntek_mdm.db"
+DATA_ROOT = "data"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-DATABASE_PATH = "konntek_mdm.db"
-DATA_ROOT = "data"
+# ... (le reste du code reste inchangé)
 
-def init_db():
-    conn = sqlite3.connect(DATABASE_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS targets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            identifiant TEXT UNIQUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+# Ajoutons aussi une commande /admin simple :
+if telegram_available:
+    async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id not in ADMIN_IDS:
+            await update.message.reply_text("⛔️ Accès refusé. Cette commande est réservée à l’administrateur.")
+            return
+        await update.message.reply_text("🔐 Panneau administrateur actif.\nUtilise /delete_target, /export, /stats_target...")
 
-def add_target(target_id):
-    try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR IGNORE INTO targets (identifiant) VALUES (?)", (target_id,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        logger.error(f"Erreur ajout cible DB : {e}")
+    # Dans __main__ : ajout du handler
+    if __name__ == '__main__':
+        init_db()
+        app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-def create_full_target_structure(target_id):
-    base_path = os.path.join(DATA_ROOT, target_id)
-    if not os.path.exists(base_path):
-        structure = [
-            "sms_mms/suivi", "sms_mms/alertes",
-            # ... reste de la structure ...
-        ]
-        for path in structure:
-            os.makedirs(os.path.join(base_path, path), exist_ok=True)
-        return True
-    return False
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("stats", stats))
+        app.add_handler(CommandHandler("files", files))
+        app.add_handler(CommandHandler("results", results))
+        app.add_handler(CommandHandler("target", target))
+        app.add_handler(CommandHandler("xdecryptor", xdecryptor))
+        app.add_handler(CommandHandler("admin", admin))  # 🔐 Ajout admin ici
 
-def get_main_menu(target_id):
-    buttons = [
-        [InlineKeyboardButton("1⃣ SMS / MMS", callback_data=f"{target_id}|sms_mms")],
-        # ... autres boutons ...
-    ]
-    return InlineKeyboardMarkup(buttons)
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_identifier))
+        app.add_handler(CallbackQueryHandler(handle_button))
 
-def get_reply_menu():
-    return ReplyKeyboardMarkup(
-        [
-            ["/stats", "/files"],
-            ["/results", "/target"],
-            ["/xdecryptor"]
-        ], resize_keyboard=True
-    )
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Bienvenue sur Konntek MDM Bot 💻\n\nEntrez un numéro de téléphone, IMEI ou numéro de série.",
-        reply_markup=get_reply_menu()
-    )
-
-async def handle_identifier(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target_id = update.message.text.strip()
-    if target_id.startswith("/"):
-        return
-    created = create_full_target_structure(target_id)
-    add_target(target_id)
-    msg = "📁 Dossier créé." if created else "📂 Dossier existant chargé."
-    await update.message.reply_text(f"{msg} Pour identifiant : {target_id}")
-    await update.message.reply_text("Choisissez une section :", reply_markup=get_main_menu(target_id))
-
-async def handle_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    try:
-        target_id, section = query.data.split("|")
-        await query.edit_message_text(f"🔹 *{section.upper().replace('_', ' ')}* pour {target_id}", parse_mode="Markdown")
-    except Exception as e:
-        await query.message.reply_text(f"Erreur: {e}")
-
-if __name__ == '__main__':
-    init_db()
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_identifier))
-    app.add_handler(CallbackQueryHandler(handle_button))
-
-    print("Bot lancé...")
-    app.run_polling()
+        print("Konntek MDM Bot actif...")
+        app.run_polling()
