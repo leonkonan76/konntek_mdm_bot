@@ -1,6 +1,5 @@
 # database.py
 import sqlite3
-from datetime import datetime
 
 def init_db(db_name):
     """Initialise la base de données"""
@@ -25,7 +24,7 @@ def init_db(db_name):
     conn.close()
 
 def add_device(db_name, device_id, device_type):
-    """Ajoute un appareil à la base de données"""
+    """Ajoute un appareil"""
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     try:
@@ -37,7 +36,7 @@ def add_device(db_name, device_id, device_type):
         conn.close()
 
 def delete_device(db_name, device_id):
-    """Supprime un appareil de la base de données"""
+    """Supprime un appareil"""
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("DELETE FROM devices WHERE id = ?", (device_id,))
