@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: konntek-mdm-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        value: ${{BOT_TOKEN}}
+      - key: ADMIN_IDS
+        value: ${{ADMIN_IDS}}
