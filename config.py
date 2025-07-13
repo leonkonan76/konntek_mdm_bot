@@ -2,10 +2,10 @@
 import os
 
 # Token du bot Telegram
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '')
+BOT_TOKEN = os.environ.get('BOT_TOKEN', 'VOTRE_TOKEN_BOT')
 
 # IDs des administrateurs
-ADMIN_IDS = [int(x) for x in os.environ.get('ADMIN_IDS', '').split(',') if x]
+ADMIN_IDS = [int(x) for x in os.environ.get('ADMIN_IDS', 'VOTRE_ID_ADMIN').split(',') if x]
 
 # Chemins de données
 DATA_PATH = os.environ.get('DATA_PATH', './data')
