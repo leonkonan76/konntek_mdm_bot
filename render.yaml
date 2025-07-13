@@ -3,12 +3,10 @@ services:
     name: konntek-mdm-bot
     runtime: python
     pythonVersion: "3.12.4"
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt
     startCommand: python main.py
     envVars:
       - key: BOT_TOKEN
-        value: ${{BOT_TOKEN}}  # Doit correspondre au nom dans Render
+        value: ${{BOT_TOKEN}}
       - key: ADMIN_IDS
         value: ${{ADMIN_IDS}}
