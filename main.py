@@ -1,5 +1,10 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, ContextTypes
-from telegram import Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes
+)
+from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import filters
 import os
 import database
@@ -73,17 +78,18 @@ async def delete_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Erreur lors de la suppression de {target_id}.")
 
 def run_bot():
-    application = Updater(BOT_TOKEN)
-    dp = application.dispatcher
-
-    # Commandes
-    dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CommandHandler("admin", admin_command))
-    dp.add_handler(CommandHandler("delete_target", delete_target))
-    dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
-
-    application.start_polling()
-    application.idle()
+    # Créer l'application avec le nouveau système
+    application = ApplicationBuilder().token(BOT_TOKEN).build()
+    
+    # Ajouter les handlers
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("delete_target", delete_target))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search))
+    
+    # Démarrer le bot
+    print("Bot démarré...")
+    application.run_polling()
 
 if __name__ == '__main__':
     run_bot()
