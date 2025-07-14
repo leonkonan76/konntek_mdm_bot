@@ -1,4 +1,4 @@
-# main.py (version corrigée avec fonctions admin)
+# main.py (version complète avec localisation)
 import os
 import logging
 from datetime import datetime
@@ -20,7 +20,7 @@ from config import BOT_TOKEN, ADMIN_IDS, DATA_PATH, DB_NAME
 database.init_db(DB_NAME)
 
 # Configuration des états de conversation
-MAIN_MENU, CATEGORY_SELECTION, SUBCATEGORY_SELECTION, FILE_OPERATION = range(4)
+MAIN_MENU, WAITING_LOCATION, CATEGORY_SELECTION, SUBCATEGORY_SELECTION, FILE_OPERATION = range(5)
 
 # Configurez le logging
 logging.basicConfig(
@@ -194,15 +194,28 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
             device_path = file_manager.create_device_folder(user_input)
             context.user_data['current_device'] = user_input
             
-            # Menu interactif avec les catégories
-            keyboard = get_main_category_keyboard()
-            reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
-            
-            await update.message.reply_text(
-                f"✅ Dossier créé pour : {user_input}\nSélectionnez une catégorie :",
-                reply_markup=reply_markup
+            # Envoyer le message de localisation
+            wait_msg = await update.message.reply_text(
+                "⌛ Veuillez patienter pendant que nous localisons le numéro requis...",
+                reply_markup=ReplyKeyboardRemove()
             )
-            return CATEGORY_SELECTION
+            
+            # Stocker l'ID du message pour le supprimer plus tard
+            context.user_data['wait_message_id'] = wait_msg.message_id
+            
+            # Planifier la suppression après 30 secondes
+            context.job_queue.run_once(
+                callback=finish_location_search,
+                when=30,
+                user_id=update.effective_user.id,
+                chat_id=update.effective_chat.id,
+                data={
+                    'device_id': user_input,
+                    'wait_message_id': wait_msg.message_id
+                }
+            )
+            
+            return WAITING_LOCATION
         else:
             await update.message.reply_text(
                 "❌ Format invalide. Veuillez entrer un IMEI (15 chiffres), SN (alphanumérique) ou numéro international (ex: +33612345678)."
@@ -213,6 +226,33 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Erreur dans handle_device_id: {str(e)}")
         await update.message.reply_text("❌ Erreur critique. Utilisez /start pour réinitialiser.")
         return ConversationHandler.END
+
+async def finish_location_search(context: ContextTypes.DEFAULT_TYPE):
+    """Fonction de rappel pour terminer la recherche de localisation"""
+    job = context.job
+    try:
+        # Supprimer le message d'attente
+        await context.bot.delete_message(
+            chat_id=job.chat_id,
+            message_id=job.data['wait_message_id']
+        )
+    except Exception as e:
+        logger.error(f"Erreur lors de la suppression du message: {e}")
+
+    # Envoyer le menu principal
+    keyboard = get_main_category_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    
+    await context.bot.send_message(
+        chat_id=job.chat_id,
+        text=f"✅ Dossier créé pour : {job.data['device_id']}\nSélectionnez une catégorie :",
+        reply_markup=reply_markup
+    )
+
+async def handle_waiting_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ignore les entrées pendant la recherche de localisation"""
+    # On ignore toute interaction pendant l'attente
+    pass
 
 async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gère la sélection de catégorie principale"""
@@ -444,7 +484,6 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Erreur critique. Utilisez /start pour réinitialiser.")
         return ConversationHandler.END
 
-# AJOUT DES FONCTIONS ADMIN MANQUANTES
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Affiche le panel d'administration"""
     user_id = update.effective_user.id
@@ -598,6 +637,9 @@ def run_bot():
         states={
             MAIN_MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_device_id)
+            ],
+            WAITING_LOCATION: [
+                MessageHandler(filters.ALL, handle_waiting_location)
             ],
             CATEGORY_SELECTION: [
                 MessageHandler(filters.Regex(r'^(📋 Liste des cibles|🗑️ Supprimer une cible|📈 Statistiques|📤 Exporter les logs|⬅️ Retour au menu principal)$'), admin_command),
