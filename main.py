@@ -1,6 +1,7 @@
-# main.py (version complète avec localisation)
+# main.py (version corrigée avec gestion de job_queue)
 import os
 import logging
+import asyncio  # Ajout de l'import asyncio
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -203,17 +204,28 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Stocker l'ID du message pour le supprimer plus tard
             context.user_data['wait_message_id'] = wait_msg.message_id
             
-            # Planifier la suppression après 30 secondes
-            context.job_queue.run_once(
-                callback=finish_location_search,
-                when=30,
-                user_id=update.effective_user.id,
-                chat_id=update.effective_chat.id,
-                data={
-                    'device_id': user_input,
-                    'wait_message_id': wait_msg.message_id
-                }
-            )
+            # Vérifier que job_queue est disponible (CORRECTION IMPORTANTE)
+            if context.job_queue is None:
+                # Si job_queue n'est pas disponible, créer une alternative
+                await asyncio.sleep(30)
+                await finish_location_search_alternative(
+                    context, 
+                    update.effective_chat.id,
+                    user_input,
+                    wait_msg.message_id
+                )
+            else:
+                # Planifier normalement si job_queue est disponible
+                context.job_queue.run_once(
+                    callback=finish_location_search,
+                    when=30,
+                    user_id=update.effective_user.id,
+                    chat_id=update.effective_chat.id,
+                    data={
+                        'device_id': user_input,
+                        'wait_message_id': wait_msg.message_id
+                    }
+                )
             
             return WAITING_LOCATION
         else:
@@ -246,6 +258,32 @@ async def finish_location_search(context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=job.chat_id,
         text=f"✅ Dossier créé pour : {job.data['device_id']}\nSélectionnez une catégorie :",
+        reply_markup=reply_markup
+    )
+
+async def finish_location_search_alternative(
+    context: ContextTypes.DEFAULT_TYPE, 
+    chat_id: int,
+    device_id: str,
+    wait_message_id: int
+):
+    """Alternative pour quand job_queue n'est pas disponible"""
+    try:
+        # Supprimer le message d'attente
+        await context.bot.delete_message(
+            chat_id=chat_id,
+            message_id=wait_message_id
+        )
+    except Exception as e:
+        logger.error(f"Erreur suppression message (alt): {e}")
+
+    # Envoyer le menu principal
+    keyboard = get_main_category_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ Dossier créé pour : {device_id}\nSélectionnez une catégorie :",
         reply_markup=reply_markup
     )
 
