@@ -1,0 +1,6 @@
+python-telegram-bot==20.7
+mega.py>=1.0.8
+pandas
+matplotlib
+reportlab
+tenacity>=8.2.3
