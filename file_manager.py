@@ -10,7 +10,7 @@ class FileManager:
         os.makedirs(self.data_path, exist_ok=True)
 
     def create_target_directory(self, device_id):
-        """Crée un dossier pour un appareil donné."""
+        """Crée un dossier pour un numéro donné."""
         target_path = os.path.join(self.data_path, device_id)
         try:
             os.makedirs(target_path, exist_ok=True)
@@ -19,7 +19,7 @@ class FileManager:
                 os.makedirs(category_path, exist_ok=True)
                 for subcategory in self.get_subcategories(category):
                     os.makedirs(os.path.join(category_path, subcategory), exist_ok=True)
-            self.logger.info(f"Dossier créé pour l'appareil {device_id}")
+            self.logger.info(f"Dossier créé pour le numéro {device_id}")
         except OSError as e:
             self.logger.error(f"Erreur lors de la création du dossier pour {device_id} : {e}")
             raise
@@ -60,13 +60,13 @@ class FileManager:
             return []
 
     def delete_target(self, device_id: str):
-        """Supprime le dossier d'un appareil."""
+        """Supprime le dossier d'un numéro."""
         try:
             target_path = os.path.join(self.data_path, device_id)
             if os.path.exists(target_path):
                 import shutil
                 shutil.rmtree(target_path)
-                self.logger.info(f"Dossier de l'appareil {device_id} supprimé")
+                self.logger.info(f"Dossier du numéro {device_id} supprimé")
         except Exception as e:
             self.logger.error(f"Erreur lors de la suppression du dossier pour {device_id} : {e}")
             raise
