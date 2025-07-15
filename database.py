@@ -1,65 +1,98 @@
-# database.py
 import sqlite3
-from datetime import datetime
+import os
 
-def init_db(db_name):
-    """Initialise la base de données"""
-    conn = sqlite3.connect(db_name)
-    c = conn.cursor()
-    
-    # Table appareils
-    c.execute('''CREATE TABLE IF NOT EXISTS devices
-                 (id TEXT PRIMARY KEY, 
-                  type TEXT,
-                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-                  
-    # Table logs
-    c.execute('''CREATE TABLE IF NOT EXISTS logs
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  device_id TEXT, 
-                  action TEXT, 
-                  file_path TEXT,
-                  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                  FOREIGN KEY(device_id) REFERENCES devices(id))''')
-    
-    # Table des requêtes utilisateurs
-    c.execute('''CREATE TABLE IF NOT EXISTS user_requests
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  user_id INTEGER,
-                  device_id TEXT,
-                  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    
-    conn.commit()
-    conn.close()
+class Database:
+    def __init__(self, db_name):
+        """Initialise la connexion à la base de données SQLite."""
+        self.db_name = db_name
+        self.conn = None
+        self.cursor = None
+        self.connect()
+        self.create_tables()
 
-def add_device(db_name, device_id, device_type):
-    """Ajoute un appareil à la base de données"""
-    conn = sqlite3.connect(db_name)
-    c = conn.cursor()
-    try:
-        c.execute("INSERT INTO devices (id, type) VALUES (?, ?)", (device_id, device_type))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        pass  # Existe déjà
-    finally:
-        conn.close()
+    def connect(self):
+        """Établit la connexion à la base de données."""
+        try:
+            self.conn = sqlite3.connect(self.db_name)
+            self.cursor = self.conn.cursor()
+        except sqlite3.Error as e:
+            print(f"Erreur de connexion à la base de données : {e}")
+            raise
 
-def delete_device(db_name, device_id):
-    """Supprime un appareil de la base de données"""
-    conn = sqlite3.connect(db_name)
-    c = conn.cursor()
-    c.execute("DELETE FROM devices WHERE id = ?", (device_id,))
-    c.execute("DELETE FROM user_requests WHERE device_id = ?", (device_id,))
-    conn.commit()
-    conn.close()
+    def create_tables(self):
+        """Crée les tables nécessaires si elles n'existent pas."""
+        try:
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS devices (
+                    device_id TEXT PRIMARY KEY
+                )
+            ''')
+            self.cursor.execute('''
+                CREATE TABLE IF NOT EXISTS logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    device_id TEXT,
+                    category TEXT,
+                    subcategory TEXT,
+                    action TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"Erreur lors de la création des tables : {e}")
+            raise
 
-def log_user_request(db_name, user_id, device_id):
-    """Journalise une requête utilisateur"""
-    conn = sqlite3.connect(db_name)
-    c = conn.cursor()
-    c.execute(
-        "INSERT INTO user_requests (user_id, device_id) VALUES (?, ?)",
-        (user_id, device_id)
-    )
-    conn.commit()
-    conn.close()
+    def device_exists(self, device_id):
+        """Vérifie si un appareil existe dans la base de données."""
+        try:
+            self.cursor.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
+            return self.cursor.fetchone() is not None
+        except sqlite3.Error as e:
+            print(f"Erreur lors de la vérification de l'appareil : {e}")
+            return False
+
+    def add_device(self, device_id):
+        """Ajoute un nouvel appareil à la base de données."""
+        try:
+            self.cursor.execute("INSERT OR IGNORE INTO devices (device_id) VALUES (?)", (device_id,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"Erreur lors de l'ajout de l'appareil : {e}")
+            raise
+
+    def delete_device(self, device_id):
+        """Supprime un appareil de la base de données."""
+        try:
+            self.cursor.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
+            self.cursor.execute("DELETE FROM logs WHERE device_id = ?", (device_id,))
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"Erreur lors de la suppression de l'appareil : {e}")
+            raise
+
+    def log_action(self, user_id, device_id, category, subcategory, action):
+        """Enregistre une action dans la table des logs."""
+        try:
+            self.cursor.execute(
+                "INSERT INTO logs (user_id, device_id, category, subcategory, action) VALUES (?, ?, ?, ?, ?)",
+                (user_id, device_id, category, subcategory, action)
+            )
+            self.conn.commit()
+        except sqlite3.Error as e:
+            print(f"Erreur lors de l'enregistrement de l'action : {e}")
+            raise
+
+    def get_logs(self, device_id):
+        """Récupère les logs pour un appareil donné."""
+        try:
+            self.cursor.execute("SELECT * FROM logs WHERE device_id = ?", (device_id,))
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            print(f"Erreur lors de la récupération des logs : {e}")
+            return []
+
+    def close(self):
+        """Ferme la connexion à la base de données."""
+        if self.conn:
+            self.conn.close()
