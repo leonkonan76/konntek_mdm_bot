@@ -1,12 +1,20 @@
 import os
 import sqlite3
 import time
+from datetime import datetime
 from mega import Mega
 from config import DATA_PATH, DB_NAME, MEGA_EMAIL, MEGA_PASSWORD
 
 # Initialisation du client MEGA
-mega = Mega()
-m = mega.login(MEGA_EMAIL, MEGA_PASSWORD)
+def get_mega_client():
+    try:
+        mega = Mega()
+        return mega.login(MEGA_EMAIL, MEGA_PASSWORD)
+    except Exception as e:
+        print(f"Erreur lors de la connexion à MEGA: {str(e)}")
+        return None
+
+mega_client = get_mega_client()
 
 def retry_operation(func, max_attempts=3, delay=5):
     """Réessaie une opération MEGA en cas d'échec"""
@@ -25,13 +33,18 @@ def create_folder(path):
         def create():
             relative_path = path.replace(DATA_PATH, '').lstrip('/')
             folders = relative_path.split('/')
-            current_path = ''
+            current_folder = mega_client.get_files()
+            parent_id = None
             for folder in folders:
-                current_path = f"{current_path}/{folder}" if current_path else f"/{folder}"
-                existing_folders = m.get_files()
-                parent_id = m.find(current_path.rsplit('/', 1)[0])[0] if current_path.count('/') > 1 else m.get_root_id()
-                if not any(f['a']['n'] == folder and f['t'] == 1 for f in existing_folders.values() if f['p'] == parent_id):
-                    m.create_folder(current_path)
+                found = False
+                for file_id, file_data in current_folder.items():
+                    if file_data.get('t') == 1 and file_data.get('n') == folder and (parent_id is None or file_data.get('p') == parent_id):
+                        parent_id = file_id
+                        found = True
+                        break
+                if not found:
+                    parent_id = mega_client.create_folder(folder, parent_id)['f'][0]['h']
+                current_folder = mega_client.get_files()
             return True
         return retry_operation(create)
     except Exception as e:
@@ -43,9 +56,11 @@ def create_device_folder(device_id):
     folder_path = f"/{device_id}"
     try:
         def create():
-            folders = m.get_files()
-            if not any(f['a']['n'] == device_id and f['t'] == 1 for f in folders.values()):
-                m.create_folder(folder_path)
+            folders = mega_client.get_files()
+            for file_id, file_data in folders.items():
+                if file_data.get('t') == 1 and file_data.get('n') == device_id and file_data.get('p') == mega_client.root_id:
+                    return folder_path
+            mega_client.create_folder(device_id, mega_client.root_id)
             return folder_path
         return retry_operation(create)
     except Exception as e:
@@ -56,8 +71,12 @@ def list_devices(data_path):
     """Liste tous les dossiers d'appareils sur MEGA"""
     try:
         def list_dev():
-            folders = m.get_files()
-            return [f['a']['n'] for f in folders.values() if f['t'] == 1 and f['p'] == m.get_root_id()]
+            folders = mega_client.get_files()
+            devices = []
+            for file_id, file_data in folders.items():
+                if file_data.get('t') == 1 and file_data.get('p') == mega_client.root_id:
+                    devices.append(file_data.get('n'))
+            return devices
         return retry_operation(list_dev)
     except Exception as e:
         print(f"Erreur lors du listage des dossiers: {str(e)}")
@@ -68,11 +87,24 @@ def list_files(category_path):
     try:
         def list_f():
             relative_path = category_path.replace(DATA_PATH, '').lstrip('/')
-            folder_id = m.find(relative_path)[0] if m.find(relative_path) else None
-            if not folder_id:
-                return []
-            files = m.get_files_in_node(folder_id)
-            return [f['a']['n'] for f in files.values() if f['t'] == 0]
+            folders = relative_path.split('/')
+            current_folder = mega_client.get_files()
+            parent_id = None
+            for folder in folders:
+                found = False
+                for file_id, file_data in current_folder.items():
+                    if file_data.get('t') == 1 and file_data.get('n') == folder and (parent_id is None or file_data.get('p') == parent_id):
+                        parent_id = file_id
+                        found = True
+                        break
+                if not found:
+                    return []
+                current_folder = mega_client.get_files()
+            files = []
+            for file_id, file_data in current_folder.items():
+                if file_data.get('t') == 0 and file_data.get('p') == parent_id:
+                    files.append(file_data.get('n'))
+            return files
         return retry_operation(list_f)
     except Exception as e:
         print(f"Erreur lors du listage des fichiers dans {category_path}: {str(e)}")
@@ -86,7 +118,19 @@ def upload_file(file_path, local_path):
             folder_path = '/'.join(relative_path.split('/')[:-1])
             file_name = relative_path.split('/')[-1]
             create_folder(os.path.join(DATA_PATH, folder_path))
-            m.upload(local_path, dest=m.find(folder_path)[0] if folder_path else None, dest_filename=file_name)
+            folders = mega_client.get_files()
+            parent_id = None
+            for folder in folder_path.split('/'):
+                found = False
+                for file_id, file_data in folders.items():
+                    if file_data.get('t') == 1 and file_data.get('n') == folder and (parent_id is None or file_data.get('p') == parent_id):
+                        parent_id = file_id
+                        found = True
+                        break
+                if not found:
+                    return False
+                folders = mega_client.get_files()
+            mega_client.upload(local_path, parent_id, file_name)
             return True
         return retry_operation(upload)
     except Exception as e:
@@ -98,10 +142,24 @@ def download_file(file_path, local_path):
     try:
         def download():
             relative_path = file_path.replace(DATA_PATH, '').lstrip('/')
-            file_id = m.find(relative_path)[0] if m.find(relative_path) else None
-            if file_id:
-                m.download(file_id, local_path)
-                return True
+            file_name = relative_path.split('/')[-1]
+            folder_path = '/'.join(relative_path.split('/')[:-1])
+            folders = mega_client.get_files()
+            parent_id = None
+            for folder in folder_path.split('/'):
+                found = False
+                for file_id, file_data in folders.items():
+                    if file_data.get('t') == 1 and file_data.get('n') == folder and (parent_id is None or file_data.get('p') == parent_id):
+                        parent_id = file_id
+                        found = True
+                        break
+                if not found:
+                    return False
+                folders = mega_client.get_files()
+            for file_id, file_data in folders.items():
+                if file_data.get('t') == 0 and file_data.get('n') == file_name and file_data.get('p') == parent_id:
+                    mega_client.download(file_id, dest_path=local_path)
+                    return True
             return False
         return retry_operation(download)
     except Exception as e:
@@ -112,11 +170,11 @@ def delete_device_folder(device_id):
     """Supprime le dossier d'un appareil sur MEGA"""
     try:
         def delete():
-            folder_path = f"/{device_id}"
-            folder_id = m.find(folder_path)[0] if m.find(folder_path) else None
-            if folder_id:
-                m.delete(folder_id)
-                return True
+            folders = mega_client.get_files()
+            for file_id, file_data in folders.items():
+                if file_data.get('t') == 1 and file_data.get('n') == device_id and file_data.get('p') == mega_client.root_id:
+                    mega_client.delete(file_id)
+                    return True
             return False
         return retry_operation(delete)
     except Exception as e:
