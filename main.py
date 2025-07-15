@@ -209,7 +209,7 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Message d'attente pour les nouveaux appareils
                 wait_message = await update.message.reply_text(
                     f"⌛ Veuillez patienter le temps que nous localisons le numéro {user_input}...\n"
-                    "⚠️ Les requêtes sont payantes, veuillez contacter l'admin (@leonkonan76)."
+                    "⚠️ Les requêtes sont payantes, veuillez contacter l'admin (@XploitFox76)."
                 )
                 # Créer le dossier
                 file_manager.create_device_folder(user_input)
