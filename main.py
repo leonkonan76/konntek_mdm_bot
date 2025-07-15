@@ -624,7 +624,7 @@ def run_bot():
     application.add_handler(CommandHandler('reset', reset_command))
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start',midi start)],
+        entry_points=[CommandHandler('start',start)],
         states={
             PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)
