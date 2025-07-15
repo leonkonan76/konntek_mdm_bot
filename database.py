@@ -21,6 +21,14 @@ def init_db(db_name):
                   file_path TEXT,
                   timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                   FOREIGN KEY(device_id) REFERENCES devices(id))''')
+    
+    # Table des requêtes utilisateurs
+    c.execute('''CREATE TABLE IF NOT EXISTS user_requests
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_id INTEGER,
+                  device_id TEXT,
+                  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    
     conn.commit()
     conn.close()
 
@@ -41,5 +49,17 @@ def delete_device(db_name, device_id):
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+    c.execute("DELETE FROM user_requests WHERE device_id = ?", (device_id,))
+    conn.commit()
+    conn.close()
+
+def log_user_request(db_name, user_id, device_id):
+    """Journalise une requête utilisateur"""
+    conn = sqlite3.connect(db_name)
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO user_requests (user_id, device_id) VALUES (?, ?)",
+        (user_id, device_id)
+    )
     conn.commit()
     conn.close()
