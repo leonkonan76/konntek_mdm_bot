@@ -269,6 +269,7 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return ConversationHandler.END
             
             # Planifier la fin de l'attente
+            logger.info("Planification de la fin d'attente pour device_id: %s", user_input)
             context.job_queue.run_once(
                 callback=end_waiting,
                 when=300,  # 5 minutes
@@ -922,7 +923,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     """Démarre le bot avec une gestion robuste"""
-    application = ApplicationBuilder().token(BOT_TOKEN).read_timeout(10).write_timeout(10).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).read_timeout(10).write_timeout(10).job_queue(True).build()
     
     application.add_handler(CommandHandler('reset', reset_command))
     
