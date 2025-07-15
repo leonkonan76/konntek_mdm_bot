@@ -1,4 +1,4 @@
-# file_manager.py (version corrigée)
+# file_manager.py
 import os
 import re
 import shutil
@@ -37,7 +37,7 @@ def create_device_folder(device_id):
     return base_path
 
 def delete_device_folder(device_id):
-    """Supprime complètement un dossier d'appareil"""
+    """Supprime complètement un dossiers d'appareil"""
     try:
         base_path = os.path.join(DATA_PATH, device_id)
         if os.path.exists(base_path):
