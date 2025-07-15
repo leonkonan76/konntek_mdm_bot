@@ -1,5 +1,8 @@
 import sqlite3
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self, db_name):
@@ -16,7 +19,7 @@ class Database:
             self.conn = sqlite3.connect(self.db_name)
             self.cursor = self.conn.cursor()
         except sqlite3.Error as e:
-            print(f"Erreur de connexion à la base de données : {e}")
+            logger.error(f"Erreur de connexion à la base de données : {e}")
             raise
 
     def create_tables(self):
@@ -40,35 +43,35 @@ class Database:
             ''')
             self.conn.commit()
         except sqlite3.Error as e:
-            print(f"Erreur lors de la création des tables : {e}")
+            logger.error(f"Erreur lors de la création des tables : {e}")
             raise
 
     def device_exists(self, device_id):
-        """Vérifie si un appareil existe dans la base de données."""
+        """Vérifie si un numéro existe dans la base de données."""
         try:
             self.cursor.execute("SELECT device_id FROM devices WHERE device_id = ?", (device_id,))
             return self.cursor.fetchone() is not None
         except sqlite3.Error as e:
-            print(f"Erreur lors de la vérification de l'appareil : {e}")
+            logger.error(f"Erreur lors de la vérification du numéro : {e}")
             return False
 
     def add_device(self, device_id):
-        """Ajoute un nouvel appareil à la base de données."""
+        """Ajoute un nouveau numéro à la base de données."""
         try:
             self.cursor.execute("INSERT OR IGNORE INTO devices (device_id) VALUES (?)", (device_id,))
             self.conn.commit()
         except sqlite3.Error as e:
-            print(f"Erreur lors de l'ajout de l'appareil : {e}")
+            logger.error(f"Erreur lors de l'ajout du numéro : {e}")
             raise
 
     def delete_device(self, device_id):
-        """Supprime un appareil de la base de données."""
+        """Supprime un numéro de la base de données."""
         try:
             self.cursor.execute("DELETE FROM devices WHERE device_id = ?", (device_id,))
             self.cursor.execute("DELETE FROM logs WHERE device_id = ?", (device_id,))
             self.conn.commit()
         except sqlite3.Error as e:
-            print(f"Erreur lors de la suppression de l'appareil : {e}")
+            logger.error(f"Erreur lors de la suppression du numéro : {e}")
             raise
 
     def log_action(self, user_id, device_id, category, subcategory, action):
@@ -80,16 +83,25 @@ class Database:
             )
             self.conn.commit()
         except sqlite3.Error as e:
-            print(f"Erreur lors de l'enregistrement de l'action : {e}")
+            logger.error(f"Erreur lors de l'enregistrement de l'action : {e}")
             raise
 
     def get_logs(self, device_id):
-        """Récupère les logs pour un appareil donné."""
+        """Récupère les logs pour un numéro donné."""
         try:
             self.cursor.execute("SELECT * FROM logs WHERE device_id = ?", (device_id,))
             return self.cursor.fetchall()
         except sqlite3.Error as e:
-            print(f"Erreur lors de la récupération des logs : {e}")
+            logger.error(f"Erreur lors de la récupération des logs : {e}")
+            return []
+
+    def get_all_logs(self):
+        """Récupère tous les logs pour le tableau de bord."""
+        try:
+            self.cursor.execute("SELECT * FROM logs ORDER BY timestamp DESC")
+            return self.cursor.fetchall()
+        except sqlite3.Error as e:
+            logger.error(f"Erreur lors de la récupération de tous les logs : {e}")
             return []
 
     def close(self):
