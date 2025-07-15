@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: konntek-mdm-bot
+    runtime: python
+    pythonVersion: "3.12.4"
+    buildCommand: rm -rf .venv && pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: BOT_TOKEN
+        value: ${{BOT_TOKEN}}
+      - key: ADMIN_IDS
+        value: ${{ADMIN_IDS}}
+      - key: BOT_PASSWORD
+        value: ${{BOT_PASSWORD}}
+      - key: DATA_PATH
+        value: /data
+      - key: MEGA_EMAIL
+        value: ${{MEGA_EMAIL}}
+      - key: MEGA_PASSWORD
+        value: ${{MEGA_PASSWORD}}
