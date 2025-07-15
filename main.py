@@ -923,7 +923,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     """Démarre le bot avec une gestion robuste"""
-    application = ApplicationBuilder().token(BOT_TOKEN).read_timeout(10).write_timeout(10).job_queue(True).build()
+    application = ApplicationBuilder().token(BOT_TOKEN).read_timeout(10).write_timeout(10).build()
     
     application.add_handler(CommandHandler('reset', reset_command))
     
