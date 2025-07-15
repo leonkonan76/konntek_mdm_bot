@@ -1,14 +1,15 @@
 # report_generator.py
 import csv
 import sqlite3
+import os
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
-from config import DB_NAME
+from config import DB_NAME, DATA_PATH
 
 def generate_csv(db_name, device_id):
     """Génère un rapport CSV des logs"""
-    filename = f"{device_id}_logs.csv"
+    filename = os.path.join(DATA_PATH, f"{device_id}_logs.csv")
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("SELECT * FROM logs WHERE device_id=?", (device_id,))
@@ -23,7 +24,7 @@ def generate_csv(db_name, device_id):
 
 def generate_pdf(db_name, device_id):
     """Génère un rapport PDF des logs"""
-    filename = f"{device_id}_report.pdf"
+    filename = os.path.join(DATA_PATH, f"{device_id}_report.pdf")
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     c.execute("SELECT * FROM logs WHERE device_id=?", (device_id,))
