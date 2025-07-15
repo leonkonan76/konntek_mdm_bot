@@ -64,6 +64,7 @@ async def handle_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("Numéro invalide. Veuillez entrer un numéro valide :")
         return ENTER_NUMBER
     db = Database(DB_NAME)
+    db.log_action(update.message.from_user.id, number, None, None, "number_entry")
     if db.device_exists(number):
         context.user_data["number"] = number
         return await show_categories(update, context)
@@ -185,6 +186,7 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     number = context.user_data["number"]
     category = context.user_data["current_category"]
     subcat = context.user_data["current_subcategory"]
+    db = Database(DB_NAME)
     if data == "main_menu":
         await query.message.edit_text("Entrez le numéro :")
         return ENTER_NUMBER
@@ -196,6 +198,7 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     elif data == "list_files":
         fm = FileManager(DATA_PATH)
         files = fm.list_files(number, category, subcat)
+        db.log_action(query.from_user.id, number, category, subcat, "list_files")
         if files:
             await query.message.edit_text(
                 f"Fichiers dans {category}/{subcat} pour {number}:\n" + "\n".join(files),
@@ -223,10 +226,26 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
     db.log_action(update.message.from_user.id, number, category, subcat, "upload")
     await update.message.reply_text(f"Fichier téléchargé dans {category}/{subcat} pour {number}.")
     await update.message.reply_text(
-        f"Catégorie : {category}\nSélectionnez une sous-catégorie :",
+        f"Numéro : {number}\nCatégorie : {category}\nSous-catégorie : {subcat}",
         reply_markup=create_subcategory_keyboard(category)
     )
     return SELECT_SUBCATEGORY
+
+async def dashboard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Affiche le tableau de bord des logs pour les admins."""
+    user_id = update.message.from_user.id
+    if str(user_id) not in ADMIN_IDS.split(","):
+        await update.message.reply_text("Commande réservée aux administrateurs.")
+        return
+    db = Database(DB_NAME)
+    logs = db.get_all_logs()
+    if not logs:
+        await update.message.reply_text("Aucun log disponible.")
+        return
+    message = "Tableau de bord des logs :\n\n"
+    for log in logs:
+        message += f"ID: {log[0]}, Utilisateur: {log[1]}, Numéro: {log[2] or 'N/A'}, Catégorie: {log[3] or 'N/A'}, Sous-catégorie: {log[4] or 'N/A'}, Action: {log[5]}, Date: {log[6]}\n"
+    await update.message.reply_text(message[:4000])  # Limite Telegram
 
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Exporte les logs en CSV ou PDF (admin uniquement)."""
@@ -302,6 +321,7 @@ def run_bot():
         allow_reentry=True
     )
     application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("dashboard", dashboard_command))
     application.add_handler(CommandHandler("export", export_command))
     application.add_handler(CommandHandler("delete_target", delete_target_command))
     application.add_error_handler(error_handler)
