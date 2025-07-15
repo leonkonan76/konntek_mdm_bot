@@ -13,7 +13,7 @@ services:
       - key: BOT_PASSWORD
         value: ${{BOT_PASSWORD}}
       - key: DATA_PATH
-        value: /data  # Préfixe pour les chemins MEGA
+        value: /data
       - key: MEGA_EMAIL
         value: ${{MEGA_EMAIL}}
       - key: MEGA_PASSWORD
