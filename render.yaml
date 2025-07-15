@@ -13,6 +13,10 @@ services:
       - key: ADMIN_IDS
         value: ${{ADMIN_IDS}}
       - key: DATA_PATH
-        value: ${{DATA_PATH}}
+        value: /opt/render/data  # Chemin de montage du disque persistant
       - key: DB_NAME
-        value: ${{DB_NAME}}
+        value: /opt/render/data/mdm_bot.db  # Base de données dans le chemin persistant
+    disks:
+      - name: mdm-bot-data
+        mountPath: /opt/render/data
+        sizeGB: 50  # Taille du disque configurée à 50 Go
