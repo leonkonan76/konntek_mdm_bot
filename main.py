@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # États de la conversation
 (
     ENTER_PASSWORD,
-    ENTER_DEVICE_ID,
+    ENTER_NUMBER,
     SELECT_CATEGORY,
     SELECT_SUBCATEGORY,
     UPLOAD_FILE,
@@ -51,26 +51,26 @@ async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Vérifie le mot de passe saisi."""
     user_input = update.message.text
     if user_input == BOT_PASSWORD:
-        await update.message.reply_text("Mot de passe correct. Entrez l'identifiant de l'appareil :")
-        return ENTER_DEVICE_ID
+        await update.message.reply_text("Mot de passe correct. Entrez le numéro :")
+        return ENTER_NUMBER
     else:
         await update.message.reply_text("Mot de passe incorrect. Réessayez :")
         return ENTER_PASSWORD
 
-async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Gère l'identifiant de l'appareil et affiche le message d'attente si nécessaire."""
-    device_id = update.message.text.strip()
-    if not device_id.isdigit() or len(device_id) < 10:
-        await update.message.reply_text("Identifiant invalide. Veuillez entrer un numéro valide :")
-        return ENTER_DEVICE_ID
+async def handle_number(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Gère le numéro saisi et affiche le message d'attente si nécessaire."""
+    number = update.message.text.strip()
+    if not number.isdigit() or len(number) < 10:
+        await update.message.reply_text("Numéro invalide. Veuillez entrer un numéro valide :")
+        return ENTER_NUMBER
     db = Database(DB_NAME)
-    if db.device_exists(device_id):
-        context.user_data["device_id"] = device_id
+    if db.device_exists(number):
+        context.user_data["number"] = number
         return await show_categories(update, context)
     else:
-        context.user_data["device_id"] = device_id
+        context.user_data["number"] = number
         context.user_data["waiting_message"] = await update.message.reply_text(
-            f"Veuillez patienter le temps que nous localisons le numéro {device_id}... et les requêtes sont payantes, voir l'admin..."
+            f"Veuillez patienter le temps que nous localisons le numéro {number}... et les requêtes sont payantes, voir l'admin..."
         )
         context.job_queue.run_once(
             end_waiting,
@@ -93,11 +93,11 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE) -> None:
     job = context.job
     chat_id = job.data["chat_id"]
     message_id = job.data["message_id"]
-    device_id = context.user_data.get("device_id")
+    number = context.user_data.get("number")
     db = Database(DB_NAME)
-    db.add_device(device_id)
+    db.add_device(number)
     fm = FileManager(DATA_PATH)
-    fm.create_target_directory(device_id)
+    fm.create_target_directory(number)
     try:
         await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
     except Exception as e:
@@ -105,9 +105,9 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot.send_message(
         chat_id=chat_id,
         text=(
-            f"Traitement du n°{device_id} terminé. La disponibilité des données est fonction du volume "
+            f"Traitement du n°{number} terminé. La disponibilité des données est fonction du volume "
             f"d’informations traitées, de la disponibilité d’Internet et de l’appareil de la cible.\n"
-            f"✅ Dossier créé pour : {device_id}\nSélectionnez une catégorie :"
+            f"✅ Dossier créé pour : {number}\nSélectionnez une catégorie :"
         ),
         reply_markup=create_category_keyboard()
     )
@@ -115,7 +115,8 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def show_categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Affiche le menu des catégories."""
-    await update.message.reply_text("Sélectionnez une catégorie :", reply_markup=create_category_keyboard())
+    number = context.user_data["number"]
+    await update.message.reply_text(f"Dossier pour : {number}\nSélectionnez une catégorie :", reply_markup=create_category_keyboard())
     return SELECT_CATEGORY
 
 def create_category_keyboard():
@@ -130,8 +131,8 @@ async def category_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     data = query.data
     if data == "main_menu":
-        await query.message.edit_text("Entrez l'identifiant de l'appareil :")
-        return ENTER_DEVICE_ID
+        await query.message.edit_text("Entrez le numéro :")
+        return ENTER_NUMBER
     category = data.replace("category_", "")
     context.user_data["current_category"] = category
     await query.message.edit_text(
@@ -153,14 +154,17 @@ async def subcategory_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     data = query.data
     if data == "main_menu":
-        await query.message.edit_text("Entrez l'identifiant de l'appareil :")
-        return ENTER_DEVICE_ID
+        await query.message.edit_text("Entrez le numéro :")
+        return ENTER_NUMBER
     elif data == "back_to_categories":
-        await query.message.edit_text("Sélectionnez une catégorie :", reply_markup=create_category_keyboard())
+        number = context.user_data["number"]
+        await query.message.edit_text(
+            f"Dossier pour : {number}\nSélectionnez une catégorie :", reply_markup=create_category_keyboard()
+        )
         return SELECT_CATEGORY
     subcat = data.replace("subcat_", "")
     context.user_data["current_subcategory"] = subcat
-    device_id = context.user_data["device_id"]
+    number = context.user_data["number"]
     keyboard = [
         [InlineKeyboardButton("📄 Lister les fichiers", callback_data="list_files")],
         [InlineKeyboardButton("⬆️ Télécharger un fichier", callback_data="upload_file")],
@@ -168,7 +172,7 @@ async def subcategory_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("⬅️ Retour au menu principal", callback_data="main_menu")]
     ]
     await query.message.edit_text(
-        f"Appareil : {device_id}\nCatégorie : {context.user_data['current_category']}\nSous-catégorie : {subcat}",
+        f"Numéro : {number}\nCatégorie : {context.user_data['current_category']}\nSous-catégorie : {subcat}",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     return SELECT_SUBCATEGORY
@@ -178,26 +182,28 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     query = update.callback_query
     await query.answer()
     data = query.data
-    device_id = context.user_data["device_id"]
+    number = context.user_data["number"]
     category = context.user_data["current_category"]
     subcat = context.user_data["current_subcategory"]
     if data == "main_menu":
-        await query.message.edit_text("Entrez l'identifiant de l'appareil :")
-        return ENTER_DEVICE_ID
+        await query.message.edit_text("Entrez le numéro :")
+        return ENTER_NUMBER
     elif data == "back_to_categories":
-        await query.message.edit_text("Sélectionnez une catégorie :", reply_markup=create_category_keyboard())
+        await query.message.edit_text(
+            f"Dossier pour : {number}\nSélectionnez une catégorie :", reply_markup=create_category_keyboard()
+        )
         return SELECT_CATEGORY
     elif data == "list_files":
         fm = FileManager(DATA_PATH)
-        files = fm.list_files(device_id, category, subcat)
+        files = fm.list_files(number, category, subcat)
         if files:
             await query.message.edit_text(
-                f"Fichiers dans {category}/{subcat} pour {device_id}:\n" + "\n".join(files),
+                f"Fichiers dans {category}/{subcat} pour {number}:\n" + "\n".join(files),
                 reply_markup=create_subcategory_keyboard(category)
             )
         else:
             await query.message.edit_text(
-                f"Aucun fichier dans {category}/{subcat} pour {device_id}.",
+                f"Aucun fichier dans {category}/{subcat} pour {number}.",
                 reply_markup=create_subcategory_keyboard(category)
             )
         return SELECT_SUBCATEGORY
@@ -208,14 +214,14 @@ async def handle_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Gère le téléchargement de fichiers."""
     file = update.message.document
-    device_id = context.user_data["device_id"]
+    number = context.user_data["number"]
     category = context.user_data["current_category"]
     subcat = context.user_data["current_subcategory"]
     fm = FileManager(DATA_PATH)
-    fm.save_file(file, device_id, category, subcat)
+    fm.save_file(file, number, category, subcat)
     db = Database(DB_NAME)
-    db.log_action(update.message.from_user.id, device_id, category, subcat, "upload")
-    await update.message.reply_text(f"Fichier téléchargé dans {category}/{subcat} pour {device_id}.")
+    db.log_action(update.message.from_user.id, number, category, subcat, "upload")
+    await update.message.reply_text(f"Fichier téléchargé dans {category}/{subcat} pour {number}.")
     await update.message.reply_text(
         f"Catégorie : {category}\nSélectionnez une sous-catégorie :",
         reply_markup=create_subcategory_keyboard(category)
@@ -229,45 +235,45 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.message.reply_text("Commande réservée aux administrateurs.")
         return
     try:
-        device_id, format_type = context.args
+        number, format_type = context.args
         db = Database(DB_NAME)
-        logs = db.get_logs(device_id)
+        logs = db.get_logs(number)
         if format_type.lower() == "csv":
-            output_path = generate_csv_report(logs, device_id, DATA_PATH)
+            output_path = generate_csv_report(logs, number, DATA_PATH)
         elif format_type.lower() == "pdf":
-            output_path = generate_pdf_report(logs, device_id, DATA_PATH)
+            output_path = generate_pdf_report(logs, number, DATA_PATH)
         else:
             await update.message.reply_text("Format invalide. Utilisez 'csv' ou 'pdf'.")
             return
         with open(output_path, "rb") as file:
             await update.message.reply_document(file, filename=os.path.basename(output_path))
     except ValueError:
-        await update.message.reply_text("Usage : /export <device_id> <csv|pdf>")
+        await update.message.reply_text("Usage : /export <number> <csv|pdf>")
 
 async def delete_target_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Supprime un appareil (admin uniquement)."""
+    """Supprime un numéro (admin uniquement)."""
     user_id = update.message.from_user.id
     if str(user_id) not in ADMIN_IDS.split(","):
         await update.message.reply_text("Commande réservée aux administrateurs.")
         return ConversationHandler.END
     try:
-        device_id = context.args[0]
-        context.user_data["device_to_delete"] = device_id
-        await update.message.reply_text(f"Confirmez la suppression de l'appareil {device_id} (oui/non) :")
+        number = context.args[0]
+        context.user_data["number_to_delete"] = number
+        await update.message.reply_text(f"Confirmez la suppression du numéro {number} (oui/non) :")
         return CONFIRM_DELETE
     except IndexError:
-        await update.message.reply_text("Usage : /delete_target <device_id>")
+        await update.message.reply_text("Usage : /delete_target <number>")
         return ConversationHandler.END
 
 async def confirm_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Confirme la suppression d'un appareil."""
+    """Confirme la suppression d'un numéro."""
     if update.message.text.lower() == "oui":
-        device_id = context.user_data["device_to_delete"]
+        number = context.user_data["number_to_delete"]
         fm = FileManager(DATA_PATH)
-        fm.delete_target(device_id)
+        fm.delete_target(number)
         db = Database(DB_NAME)
-        db.delete_device(device_id)
-        await update.message.reply_text(f"Appareil {device_id} supprimé.")
+        db.delete_device(number)
+        await update.message.reply_text(f"Numéro {number} supprimé.")
     else:
         await update.message.reply_text("Suppression annulée.")
     return ConversationHandler.END
@@ -286,7 +292,7 @@ def run_bot():
         entry_points=[CommandHandler("start", start)],
         states={
             ENTER_PASSWORD: [MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)],
-            ENTER_DEVICE_ID: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_device_id)],
+            ENTER_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_number)],
             SELECT_CATEGORY: [CallbackQueryHandler(category_callback)],
             SELECT_SUBCATEGORY: [CallbackQueryHandler(handle_action)],
             UPLOAD_FILE: [MessageHandler(filters.Document.ALL, handle_file_upload)],
