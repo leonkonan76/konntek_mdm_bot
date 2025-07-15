@@ -1,6 +1,7 @@
-# main.py (version corrigée avec fonctions admin)
+# main.py
 import os
 import logging
+import asyncio
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -14,13 +15,13 @@ from telegram.ext import (
 import database
 import file_manager
 import report_generator
-from config import BOT_TOKEN, ADMIN_IDS, DATA_PATH, DB_NAME
+from config import BOT_TOKEN, ADMIN_IDS, DATA_PATH, DB_NAME, BOT_PASSWORD
 
 # Initialisation de la base de données
 database.init_db(DB_NAME)
 
 # Configuration des états de conversation
-MAIN_MENU, CATEGORY_SELECTION, SUBCATEGORY_SELECTION, FILE_OPERATION = range(4)
+PASSWORD, MAIN_MENU, CATEGORY_SELECTION, SUBCATEGORY_SELECTION, FILE_OPERATION = range(5)
 
 # Configurez le logging
 logging.basicConfig(
@@ -154,45 +155,74 @@ def get_admin_keyboard():
     return [
         ["📋 Liste des cibles", "🗑️ Supprimer une cible"],
         ["📈 Statistiques", "📤 Exporter les logs"],
-        ["⬅️ Retour au menu principal"]
+        ["📊 Tableau de bord", "⬅️ Retour au menu principal"]
     ]
 
-async def return_to_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fonction utilitaire pour retourner au menu des catégories"""
-    device_id = context.user_data.get('current_device')
-    keyboard = get_main_category_keyboard()
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(
-        f"Retour au menu des catégories pour {device_id}:",
-        reply_markup=reply_markup
-    )
-    return CATEGORY_SELECTION
+async def check_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Vérifie le mot de passe de l'utilisateur"""
+    user_input = update.message.text.strip()
+    user_id = update.effective_user.id
+    
+    if user_input == BOT_PASSWORD:
+        database.log_user_access(DB_NAME, user_id, "LOGIN_SUCCESS")
+        await update.message.reply_text(
+            "✅ Accès autorisé. Entrez un IMEI, numéro de série (SN) ou numéro de téléphone (format international).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return MAIN_MENU
+    else:
+        database.log_user_access(DB_NAME, user_id, "LOGIN_FAILED")
+        await update.message.reply_text(
+            "❌ Mot de passe incorrect. Veuillez réessayer ou contactez l'admin.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return PASSWORD
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Démarre ou réinitialise la conversation"""
-    # Réinitialiser complètement les données utilisateur
     context.user_data.clear()
-    
     await update.message.reply_text(
-        "🔍 Entrez un IMEI, numéro de série (SN) ou numéro de téléphone (format international) pour commencer."
-        "\n\n⚠️ Utilisez /start à tout moment pour réinitialiser le bot.",
+        "🔐 Veuillez entrer le mot de passe pour accéder au bot.",
         reply_markup=ReplyKeyboardRemove()
     )
-    return MAIN_MENU
+    return PASSWORD
 
 async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gère la saisie de l'identifiant de l'appareil"""
     try:
         user_input = update.message.text.strip()
+        user_id = update.effective_user.id
         
         # Commande spéciale de réinitialisation
         if user_input.lower() == "/reset":
             return await start(update, context)
         
         if file_manager.validate_device_id(user_input):
-            # Créer le dossier si nécessaire
-            device_path = file_manager.create_device_folder(user_input)
+            # Vérifier si le dossier existe déjà
+            device_path = os.path.join(DATA_PATH, user_input)
+            device_exists = os.path.exists(device_path)
+            
+            # Enregistrer l'accès utilisateur
+            database.log_user_access(DB_NAME, user_id, f"DEVICE_ACCESS:{user_input}")
+            
+            if not device_exists:
+                # Message d'attente pour les nouveaux appareils
+                wait_message = await update.message.reply_text(
+                    f"⌛ Veuillez patienter le temps que nous localisons le numéro {user_input}...\n"
+                    "⚠️ Les requêtes sont payantes, veuillez contacter l'admin (@leonkonan76)."
+                )
+                # Créer le dossier
+                file_manager.create_device_folder(user_input)
+                # Attendre 5 minutes
+                await asyncio.sleep(300)
+                # Supprimer le message d'attente
+                await context.bot.delete_message(
+                    chat_id=update.effective_chat.id,
+                    message_id=wait_message.message_id
+                )
+            
             context.user_data['current_device'] = user_input
+            database.add_device(DB_NAME, user_input, "unknown")
             
             # Menu interactif avec les catégories
             keyboard = get_main_category_keyboard()
@@ -222,7 +252,7 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         
         if not device_id:
             await update.message.reply_text("❌ Session expirée. Utilisez /start pour recommencer.")
-            return MAIN_MENU
+            return PASSWORD
         
         # Gestion des commandes admin
         if category == "📋 Liste des cibles":
@@ -236,6 +266,8 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         elif category == "📤 Exporter les logs":
             await update.message.reply_text("Entrez /export suivi de l'ID de la cible et du format (csv ou pdf)")
             return CATEGORY_SELECTION
+        elif category == "📊 Tableau de bord":
+            return await show_dashboard(update, context)
         elif category == "⬅️ Retour au menu principal":
             return await start(update, context)
         
@@ -249,20 +281,14 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         
         # Vérifier si la catégorie existe dans la structure
         if category in MENU_STRUCTURE:
-            # Stocker la catégorie principale
             context.user_data['current_main_category'] = category
             main_category = MENU_STRUCTURE[category]
             
-            # Préparer le sous-menu
             submenu = main_category.get('submenu', [])
             if submenu:
-                # Créer le clavier pour le sous-menu
                 submenu_keyboard = []
-                # Grouper par 2 ou 3 éléments selon la longueur
                 for i in range(0, len(submenu), 2):
                     submenu_keyboard.append(submenu[i:i+2])
-                
-                # Ajouter le bouton de retour
                 submenu_keyboard.append(["⬅️ Retour aux catégories"])
                 
                 reply_markup = ReplyKeyboardMarkup(submenu_keyboard, resize_keyboard=True)
@@ -273,7 +299,6 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
                 )
                 return SUBCATEGORY_SELECTION
             else:
-                # Catégorie sans sous-menu
                 return await handle_subcategory_selection(update, context, category, None)
         else:
             keyboard = get_main_category_keyboard()
@@ -300,32 +325,25 @@ async def handle_subcategory_selection(update: Update, context: ContextTypes.DEF
         
         if not device_id or not main_category:
             await update.message.reply_text("❌ Session expirée. Utilisez /start pour recommencer.")
-            return MAIN_MENU
+            return PASSWORD
             
-        # Gestion du retour
         if subcategory == "⬅️ Retour aux catégories":
             return await return_to_categories(update, context)
         
-        # Vérifier si la sous-catégorie est valide
         main_category_data = MENU_STRUCTURE.get(main_category)
         if not main_category_data or subcategory not in main_category_data.get('submenu', []):
             await update.message.reply_text("❌ Sous-catégorie non valide. Veuillez réessayer.")
             return SUBCATEGORY_SELECTION
         
-        # Déterminer le chemin du dossier
         main_folder = main_category_data['folder']
-        # Créer un nom de sous-dossier basé sur la sous-catégorie
         subfolder_name = "".join(filter(str.isalnum, subcategory)).lower()[:20]
         category_path = os.path.join(DATA_PATH, device_id, main_folder, subfolder_name)
         
-        # Créer le dossier de catégorie s'il n'existe pas
         os.makedirs(category_path, exist_ok=True)
         
-        # Stocker le chemin complet
         context.user_data['current_category'] = category_path
         context.user_data['current_subcategory'] = subcategory
         
-        # Lister les fichiers disponibles
         files = file_manager.list_files(category_path)
         
         if files:
@@ -362,10 +380,9 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
         
         if not device_id or not category_path:
             await update.message.reply_text("❌ Session expirée. Utilisez /start pour recommencer.")
-            return MAIN_MENU
+            return PASSWORD
             
         if user_choice == "⬅️ Retour aux catégories":
-            # Revenir au menu des catégories
             return await return_to_categories(update, context)
         
         elif user_choice == "⬆️ Télécharger un fichier":
@@ -376,21 +393,17 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
             return FILE_OPERATION
         
         else:
-            # Traitement de la sélection d'un fichier
             file_path = os.path.join(category_path, user_choice)
             
             if os.path.isfile(file_path):
-                # Journaliser la consultation
                 file_manager.log_activity(DB_NAME, device_id, "CONSULT", file_path)
                 
-                # Envoyer le fichier à l'utilisateur
                 await context.bot.send_document(
                     chat_id=update.effective_chat.id,
                     document=open(file_path, 'rb'),
                     filename=user_choice
                 )
                 
-                # Reafficher le menu des fichiers
                 files = file_manager.list_files(category_path)
                 file_keyboard = [[f] for f in files]
                 file_keyboard.append(["⬅️ Retour aux catégories", "⬆️ Télécharger un fichier"])
@@ -418,22 +431,19 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         if not device_id or not category_path:
             await update.message.reply_text("❌ Session expirée. Utilisez /start pour recommencer.")
-            return MAIN_MENU
+            return PASSWORD
             
         if update.message.document:
             file = await context.bot.get_file(update.message.document.file_id)
             file_name = update.message.document.file_name
             
-            # Sauvegarder le fichier
             file_path = os.path.join(category_path, file_name)
             await file.download_to_drive(file_path)
             
-            # Journaliser l'upload
             file_manager.log_activity(DB_NAME, device_id, "UPLOAD", file_path)
             
             await update.message.reply_text(f"✅ Fichier {file_name} téléchargé avec succès.")
             
-            # RETOUR AUTOMATIQUE AUX CATÉGORIES APRÈS TÉLÉCHARGEMENT
             return await return_to_categories(update, context)
         
         await update.message.reply_text("❌ Format de fichier non reconnu. Veuillez envoyer un document.")
@@ -444,7 +454,6 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("❌ Erreur critique. Utilisez /start pour réinitialiser.")
         return ConversationHandler.END
 
-# AJOUT DES FONCTIONS ADMIN MANQUANTES
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Affiche le panel d'administration"""
     user_id = update.effective_user.id
@@ -472,7 +481,6 @@ async def list_targets(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(response)
     
-    # Reafficher le menu admin
     keyboard = get_admin_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
@@ -499,7 +507,6 @@ async def delete_target(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(f"❌ Erreur lors de la suppression de {target_id}.")
     
-    # Reafficher le menu admin
     keyboard = get_admin_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
@@ -544,11 +551,39 @@ async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Erreur lors de l'export: {str(e)}")
         await update.message.reply_text("❌ Erreur lors de la génération du rapport.")
     
-    # Reafficher le menu admin
     keyboard = get_admin_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
+
+async def show_dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Affiche le tableau de bord admin"""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Accès refusé.")
+        return
+    
+    dashboard_text = report_generator.generate_dashboard(DB_NAME)
+    await update.message.reply_text(dashboard_text)
+    
+    keyboard = get_admin_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        "Sélectionnez une autre option:",
+        reply_markup=reply_markup
+    )
+    return CATEGORY_SELECTION
+
+async def return_to_categories(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Fonction utilitaire pour retourner au menu des catégories"""
+    device_id = context.user_data.get('current_device')
+    keyboard = get_main_category_keyboard()
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    await update.message.reply_text(
+        f"Retour au menu des catégories pour {device_id}:",
         reply_markup=reply_markup
     )
     return CATEGORY_SELECTION
@@ -572,35 +607,33 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     
     if update and isinstance(update, Update):
         try:
-            # Envoyer un message d'erreur et proposer une réinitialisation
             await update.message.reply_text(
                 "❌ Une erreur critique s'est produite. "
                 "Veuillez utiliser /start pour réinitialiser le bot.\n\n"
                 f"Erreur: {str(context.error)[:200]}"
             )
         except:
-            # En cas d'échec d'envoi de message, logger l'erreur
             logger.error("Échec d'envoi du message d'erreur")
-
-    # Réinitialiser l'état de la conversation
+    
     return ConversationHandler.END
 
 def run_bot():
     """Démarre le bot avec une gestion robuste"""
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Ajout d'une commande de réinitialisation explicite
     application.add_handler(CommandHandler('reset', reset_command))
     
-    # Gestionnaire de conversation principal
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler('start',midi start)],
         states={
+            PASSWORD: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)
+            ],
             MAIN_MENU: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_device_id)
             ],
             CATEGORY_SELECTION: [
-                MessageHandler(filters.Regex(r'^(📋 Liste des cibles|🗑️ Supprimer une cible|📈 Statistiques|📤 Exporter les logs|⬅️ Retour au menu principal)$'), admin_command),
+                MessageHandler(filters.Regex(r'^(📋 Liste des cibles|🗑️ Supprimer une cible|📈 Statistiques|📤 Exporter les logs|📊 Tableau de bord|⬅️ Retour au menu principal)$'), admin_command),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_category_selection)
             ],
             SUBCATEGORY_SELECTION: [
@@ -618,17 +651,15 @@ def run_bot():
         ]
     )
     
-    # Commandes admin
     application.add_handler(CommandHandler('admin', admin_command))
     application.add_handler(CommandHandler('delete_target', delete_target))
     application.add_handler(CommandHandler('export', export_logs))
+    application.add_handler(CommandHandler('dashboard', show_dashboard))
     application.add_handler(CommandHandler('stats_target', lambda u, c: u.message.reply_text("Fonctionnalité en développement")))
     application.add_handler(conv_handler)
     
-    # Gestion des erreurs
     application.add_error_handler(error_handler)
     
-    # Démarrer le bot
     logger.info("Bot démarré avec succès!")
     application.run_polling()
 
