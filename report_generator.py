@@ -42,3 +42,37 @@ def generate_pdf(db_name, device_id):
     
     doc.build(story)
     return filename
+
+def generate_dashboard(db_name):
+    """Génère un tableau de bord textuel des activités des utilisateurs"""
+    conn = sqlite3.connect(db_name)
+    c = conn.cursor()
+    
+    # Récupérer les utilisateurs uniques
+    c.execute("SELECT DISTINCT user_id FROM user_access")
+    users = c.fetchall()
+    
+    dashboard = ["📊 Tableau de bord des utilisateurs"]
+    
+    for user in users:
+        user_id = user[0]
+        c.execute(
+            "SELECT action, timestamp FROM user_access WHERE user_id=? ORDER BY timestamp DESC LIMIT 5",
+            (user_id,)
+        )
+        user_logs = c.fetchall()
+        
+        dashboard.append(f"\n👤 Utilisateur ID: {user_id}")
+        for log in user_logs:
+            action = log[0]
+            timestamp = log[1]
+            if action.startswith("DEVICE_ACCESS:"):
+                device_id = action.split(":")[1]
+                dashboard.append(f"  - {timestamp}: Accès au numéro {device_id}")
+            elif action == "LOGIN_SUCCESS":
+                dashboard.append(f"  - {timestamp}: Connexion réussie")
+            elif action == "LOGIN_FAILED":
+                dashboard.append(f"  - {timestamp}: Tentative de connexion échouée")
+    
+    conn.close()
+    return "\n".join(dashboard) if dashboard else "ℹ️ Aucun log utilisateur disponible."
