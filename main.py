@@ -165,26 +165,44 @@ async def return_to_categories(update: Update, context: ContextTypes.DEFAULT_TYP
     device_id = context.user_data.get('current_device')
     keyboard = get_main_category_keyboard()
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    for attempt in range(3):
+        try:
+            await update.message.reply_text(
+                f"Retour au menu des catégories pour {device_id}:",
+                reply_markup=reply_markup
+            )
+            return CATEGORY_SELECTION
+        except telegram.error.TimedOut:
+            logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+            await asyncio.sleep(2)
     await update.message.reply_text(
-        f"Retour au menu des catégories pour {device_id}:",
-        reply_markup=reply_markup
+        "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
     )
-    return CATEGORY_SELECTION
+    return ConversationHandler.END
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Démarre ou réinitialise la conversation"""
     context.user_data.clear()
+    for attempt in range(3):
+        try:
+            await update.message.reply_text(
+                "🔒 Veuillez entrer le mot de passe pour accéder au bot.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return PASSWORD
+        except telegram.error.TimedOut:
+            logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+            await asyncio.sleep(2)
     await update.message.reply_text(
-        "🔒 Veuillez entrer le mot de passe pour accéder au bot.",
-        reply_markup=ReplyKeyboardRemove()
+        "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
     )
-    return PASSWORD
+    return ConversationHandler.END
 
 async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Vérifie le mot de passe"""
     user_input = update.message.text.strip()
     if user_input == BOT_PASSWORD:
-        for attempt in range(3):  # Retry up to 3 times
+        for attempt in range(3):
             try:
                 await update.message.reply_text(
                     "✅ Mot de passe correct.\n"
@@ -194,16 +212,25 @@ async def handle_password(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return MAIN_MENU
             except telegram.error.TimedOut:
                 logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
-                await asyncio.sleep(2)  # Wait before retrying
+                await asyncio.sleep(2)
         await update.message.reply_text(
             "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
         )
         return ConversationHandler.END
     else:
+        for attempt in range(3):
+            try:
+                await update.message.reply_text(
+                    "❌ Mot de passe incorrect. Veuillez réessayer ou utiliser /cancel pour annuler."
+                )
+                return PASSWORD
+            except telegram.error.TimedOut:
+                logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                await asyncio.sleep(2)
         await update.message.reply_text(
-            "❌ Mot de passe incorrect. Veuillez réessayer ou utiliser /cancel pour annuler."
+            "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
         )
-        return PASSWORD
+        return ConversationHandler.END
 
 async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gère la saisie de l'identifiant de l'appareil"""
@@ -307,16 +334,21 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE):
     
     try:
         # Supprimer le message d'attente
-        for attempt in range(3):
-            try:
-                await context.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=context.user_data.get('waiting_message_id')
-                )
-                break
-            except telegram.error.TimedOut:
-                logger.warning(f"Timeout lors de la suppression du message, tentative {attempt + 1}/3")
-                await asyncio.sleep(2)
+        waiting_message_id = context.user_data.get('waiting_message_id')
+        if waiting_message_id:
+            for attempt in range(3):
+                try:
+                    await context.bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=waiting_message_id
+                    )
+                    break
+                except telegram.error.TimedOut:
+                    logger.warning(f"Timeout lors de la suppression du message, tentative {attempt + 1}/3")
+                    await asyncio.sleep(2)
+                except telegram.error.BadRequest:
+                    logger.warning("Message d'attente déjà supprimé ou introuvable")
+                    break
         
         # Ajouter l'appareil à la base de données
         database.add_device(DB_NAME, device_id, "unknown")
@@ -340,6 +372,10 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(2)
         else:
             logger.error("Échec de l'envoi du message de fin après plusieurs tentatives")
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
+            )
             return ConversationHandler.END
         
         # Mettre à jour l'état
@@ -358,11 +394,33 @@ async def end_waiting(context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_waiting(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gère les interactions pendant la période d'attente"""
+    user_input = update.message.text.strip()
+    
+    # Permettre le retour au menu principal
+    if user_input == "⬅️ Retour au menu principal" or user_input.lower() == "/start":
+        context.user_data.clear()
+        for attempt in range(3):
+            try:
+                await update.message.reply_text(
+                    "🔒 Veuillez entrer le mot de passe pour accéder au bot.",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                return PASSWORD
+            except telegram.error.TimedOut:
+                logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                await asyncio.sleep(2)
+        await update.message.reply_text(
+            "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
+        )
+        return ConversationHandler.END
+    
+    # Message indiquant que le traitement est en cours
     for attempt in range(3):
         try:
             await update.message.reply_text(
                 "⏳ Veuillez patienter, le traitement est en cours. "
-                "Vous pouvez continuer à interagir avec le bot après la fin du traitement."
+                "Vous pouvez continuer à interagir avec le bot après la fin du traitement.\n"
+                "Utilisez '/start' pour retourner au menu principal."
             )
             return WAITING
         except telegram.error.TimedOut:
@@ -431,11 +489,20 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         else:
             keyboard = get_main_category_keyboard()
             reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            for attempt in range(3):
+                try:
+                    await update.message.reply_text(
+                        "❌ Catégorie non reconnue. Veuillez choisir une option valide :",
+                        reply_markup=reply_markup
+                    )
+                    return CATEGORY_SELECTION
+                except telegram.error.TimedOut:
+                    logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                    await asyncio.sleep(2)
             await update.message.reply_text(
-                "❌ Catégorie non reconnue. Veuillez choisir une option valide :",
-                reply_markup=reply_markup
+                "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
             )
-            return CATEGORY_SELECTION
+            return ConversationHandler.END
     
     except Exception as e:
         logger.error(f"Erreur dans handle_category_selection: {str(e)}")
@@ -464,8 +531,26 @@ async def handle_subcategory_selection(update: Update, context: ContextTypes.DEF
         # Vérifier si la sous-catégorie est valide
         main_category_data = MENU_STRUCTURE.get(main_category)
         if not main_category_data or subcategory not in main_category_data.get('submenu', []):
-            await update.message.reply_text("❌ Sous-catégorie non valide. Veuillez réessayer.")
-            return SUBCATEGORY_SELECTION
+            submenu = main_category_data.get('submenu', [])
+            submenu_keyboard = []
+            for i in range(0, len(submenu), 2):
+                submenu_keyboard.append(submenu[i:i+2])
+            submenu_keyboard.append(["⬅️ Retour aux catégories", "⬅️ Retour au menu principal"])
+            reply_markup = ReplyKeyboardMarkup(submenu_keyboard, resize_keyboard=True)
+            for attempt in range(3):
+                try:
+                    await update.message.reply_text(
+                        "❌ Sous-catégorie non valide. Veuillez choisir une option :",
+                        reply_markup=reply_markup
+                    )
+                    return SUBCATEGORY_SELECTION
+                except telegram.error.TimedOut:
+                    logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                    await asyncio.sleep(2)
+            await update.message.reply_text(
+                "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
+            )
+            return ConversationHandler.END
         
         # Déterminer le chemin du dossier
         main_folder = main_category_data['folder']
@@ -615,7 +700,26 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
                     )
                     return ConversationHandler.END
             else:
-                await update.message.reply_text("❌ Fichier introuvable. Veuillez choisir un fichier valide.")
+                files = file_manager.list_files(category_path)
+                file_keyboard = [[f] for f in files]
+                file_keyboard.append(["⬆️ Télécharger un fichier"])
+                file_keyboard.append(["⬅️ Retour aux catégories", "⬅️ Retour au menu principal"])
+                reply_markup = ReplyKeyboardMarkup(file_keyboard, resize_keyboard=True)
+                for attempt in range(3):
+                    try:
+                        await update.message.reply_text(
+                            "❌ Fichier introuvable. Veuillez choisir une option valide :",
+                            reply_markup=reply_markup
+                        )
+                        break
+                    except telegram.error.TimedOut:
+                        logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                        await asyncio.sleep(2)
+                else:
+                    await update.message.reply_text(
+                        "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
+                    )
+                    return ConversationHandler.END
             
             return FILE_OPERATION
     
@@ -658,10 +762,31 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 )
                 return ConversationHandler.END
             
-            # RETOUR AUTOMATIQUE AUX CATÉGORIES APRÈS TÉLÉCHARGEMENT
+            # Retour automatique aux catégories après téléchargement
             return await return_to_categories(update, context)
         
-        await update.message.reply_text("❌ Format de fichier non reconnu. Veuillez envoyer un document.")
+        # Si aucun fichier n'est envoyé, reafficher le menu avec options de retour
+        files = file_manager.list_files(category_path)
+        file_keyboard = [[f] for f in files]
+        file_keyboard.append(["⬆️ Télécharger un fichier"])
+        file_keyboard.append(["⬅️ Retour aux catégories", "⬅️ Retour au menu principal"])
+        reply_markup = ReplyKeyboardMarkup(file_keyboard, resize_keyboard=True)
+        for attempt in range(3):
+            try:
+                await update.message.reply_text(
+                    "❌ Format de fichier non reconnu. Veuillez envoyer un document ou choisir une autre action :",
+                    reply_markup=reply_markup
+                )
+                break
+            except telegram.error.TimedOut:
+                logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+                await asyncio.sleep(2)
+        else:
+            await update.message.reply_text(
+                "❌ Échec de connexion à Telegram après plusieurs tentatives. Veuillez réessayer plus tard."
+            )
+            return ConversationHandler.END
+        
         return FILE_OPERATION
     
     except Exception as e:
@@ -894,10 +1019,16 @@ async def dashboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Annule la conversation et réinitialise complètement"""
     context.user_data.clear()
-    await update.message.reply_text(
-        "✅ Opération annulée. Tapez /start pour recommencer.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    for attempt in range(3):
+        try:
+            await update.message.reply_text(
+                "✅ Opération annulée. Tapez /start pour recommencer.",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            break
+        except telegram.error.TimedOut:
+            logger.warning(f"Timeout lors de l'envoi du message, tentative {attempt + 1}/3")
+            await asyncio.sleep(2)
     return ConversationHandler.END
 
 async def reset_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
