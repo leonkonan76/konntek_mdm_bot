@@ -213,13 +213,24 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
                 # Créer le dossier
                 file_manager.create_device_folder(user_input)
-                # Attendre 5 minutes
-                await asyncio.sleep(300)
-                # Supprimer le message d'attente
-                await context.bot.delete_message(
-                    chat_id=update.effective_chat.id,
-                    message_id=wait_message.message_id
-                )
+                
+                # Planifier la suppression du message et l'envoi du message de confirmation
+                async def handle_wait_message():
+                    await asyncio.sleep(300)  # Attendre 5 minutes
+                    try:
+                        await context.bot.delete_message(
+                            chat_id=update.effective_chat.id,
+                            message_id=wait_message.message_id
+                        )
+                        await context.bot.send_message(
+                            chat_id=update.effective_chat.id,
+                            text="✅ Localisation terminée. La disponibilité des données est fonction du volume d’informations traitées, de la disponibilité d’Internet et de l’appareil de la cible."
+                        )
+                    except Exception as e:
+                        logger.error(f"Erreur lors de la suppression du message d'attente ou envoi de confirmation: {str(e)}")
+                
+                # Lancer la tâche asynchrone sans bloquer
+                asyncio.create_task(handle_wait_message())
             
             context.user_data['current_device'] = user_input
             database.add_device(DB_NAME, user_input, "unknown")
@@ -624,7 +635,7 @@ def run_bot():
     application.add_handler(CommandHandler('reset', reset_command))
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start',start)],
+        entry_points=[CommandHandler('start', start)],
         states={
             PASSWORD: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, check_password)
