@@ -13,7 +13,7 @@ def generate_csv(db_name, device_id):
     c = conn.cursor()
     c.execute("SELECT * FROM logs WHERE device_id=?", (device_id,))
     
-    with open(filename, 'w', newline='') as f:
+    with open(filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow(['ID', 'Device ID', 'Action', 'File Path', 'Timestamp'])
         writer.writerows(c.fetchall())
@@ -36,7 +36,7 @@ def generate_pdf(db_name, device_id):
     
     for log in logs:
         story.append(Paragraph(
-            f"{log[4]}: {log[2]} - {log[3] or 'Aucun fichier'}", 
+            f"{log[4]}: {log[2]} - {log[3] or 'Aucun fichier'}",
             styles['BodyText']
         ))
     
