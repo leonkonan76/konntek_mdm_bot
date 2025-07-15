@@ -10,3 +10,5 @@ services:
         value: ${{BOT_TOKEN}}
       - key: ADMIN_IDS
         value: ${{ADMIN_IDS}}
+      - key: BOT_PASSWORD
+        value: ${{BOT_PASSWORD}}
