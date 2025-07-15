@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import shutil
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -25,9 +26,13 @@ PASSWORD, MAIN_MENU, CATEGORY_SELECTION, SUBCATEGORY_SELECTION, FILE_OPERATION =
 # Configurez le logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.DEBUG
 )
 logger = logging.getLogger(__name__)
+file_handler = logging.FileHandler('bot.log')
+file_handler.setLevel(logging.DEBUG)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(file_handler)
 
 # Structure complète du menu
 MENU_STRUCTURE = {
@@ -223,11 +228,13 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             chat_id=update.effective_chat.id,
                             message_id=wait_message.message_id
                         )
+                    except Exception as e:
+                        logger.warning(f"Impossible de supprimer le message d'attente: {str(e)}")
+                    try:
                         await context.bot.send_message(
                             chat_id=update.effective_chat.id,
                             text="✅ Localisation terminée. La disponibilité des données est fonction du volume d’informations traitées, de la disponibilité d’Internet et de l’appareil de la cible."
                         )
-                        # Afficher le menu des catégories
                         keyboard = get_main_category_keyboard()
                         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
                         await context.bot.send_message(
@@ -236,7 +243,7 @@ async def handle_device_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             reply_markup=reply_markup
                         )
                     except Exception as e:
-                        logger.error(f"Erreur lors de la suppression du message d'attente, envoi de confirmation ou affichage du menu: {str(e)}")
+                        logger.error(f"Erreur lors de l'envoi du message de confirmation ou du menu: {str(e)}")
                 
                 # Lancer la tâche asynchrone sans bloquer
                 asyncio.create_task(handle_wait_message())
@@ -414,34 +421,40 @@ async def handle_file_operation(update: Update, context: ContextTypes.DEFAULT_TY
         else:
             file_path = os.path.join(category_path, user_choice)
             
+            # Nettoyer le répertoire temporaire
+            shutil.rmtree('/tmp', ignore_errors=True)
+            os.makedirs('/tmp', exist_ok=True)
+            
             # Télécharger le fichier depuis MEGA temporairement
             temp_file_path = os.path.join('/tmp', user_choice)
             try:
-                file_manager.download_file(file_path, temp_file_path)
-                
-                file_manager.log_activity(DB_NAME, device_id, "CONSULT", file_path)
-                
-                await context.bot.send_document(
-                    chat_id=update.effective_chat.id,
-                    document=open(temp_file_path, 'rb'),
-                    filename=user_choice
-                )
-                
-                # Supprimer le fichier temporaire
-                if os.path.exists(temp_file_path):
-                    os.remove(temp_file_path)
-                
-                files = file_manager.list_files(category_path)
-                file_keyboard = [[f] for f in files]
-                file_keyboard.append(["⬅️ Retour aux catégories", "⬆️ Télécharger un fichier"])
-                reply_markup = ReplyKeyboardMarkup(file_keyboard, resize_keyboard=True)
-                
-                await update.message.reply_text(
-                    "Sélectionnez une autre action:",
-                    reply_markup=reply_markup
-                )
+                if file_manager.download_file(file_path, temp_file_path):
+                    file_manager.log_activity(DB_NAME, device_id, "CONSULT", file_path)
+                    
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=open(temp_file_path, 'rb'),
+                        filename=user_choice
+                    )
+                    
+                    # Supprimer le fichier temporaire
+                    if os.path.exists(temp_file_path):
+                        os.remove(temp_file_path)
+                    
+                    files = file_manager.list_files(category_path)
+                    file_keyboard = [[f] for f in files]
+                    file_keyboard.append(["⬅️ Retour aux catégories", "⬆️ Télécharger un fichier"])
+                    reply_markup = ReplyKeyboardMarkup(file_keyboard, resize_keyboard=True)
+                    
+                    await update.message.reply_text(
+                        "Sélectionnez une autre action:",
+                        reply_markup=reply_markup
+                    )
+                else:
+                    await update.message.reply_text("❌ Fichier introuvable sur MEGA.")
             except Exception as e:
-                await update.message.reply_text(f"❌ Fichier introuvable sur MEGA: {str(e)}")
+                logger.error(f"Erreur lors du téléchargement du fichier {file_path}: {str(e)}")
+                await update.message.reply_text(f"❌ Erreur lors de la récupération du fichier: {str(e)}")
             
             return FILE_OPERATION
     
@@ -464,23 +477,31 @@ async def handle_file_upload(update: Update, context: ContextTypes.DEFAULT_TYPE)
             file = await context.bot.get_file(update.message.document.file_id)
             file_name = update.message.document.file_name
             
+            # Nettoyer le répertoire temporaire
+            shutil.rmtree('/tmp', ignore_errors=True)
+            os.makedirs('/tmp', exist_ok=True)
+            
             # Télécharger temporairement le fichier localement
             temp_file_path = os.path.join('/tmp', file_name)
             await file.download_to_drive(temp_file_path)
             
             # Enregistrer le fichier sur MEGA
             file_path = os.path.join(category_path, file_name)
-            file_manager.upload_file(file_path, temp_file_path)
-            
-            # Supprimer le fichier temporaire
-            if os.path.exists(temp_file_path):
-                os.remove(temp_file_path)
-            
-            file_manager.log_activity(DB_NAME, device_id, "UPLOAD", file_path)
-            
-            await update.message.reply_text(f"✅ Fichier {file_name} téléchargé avec succès sur MEGA.")
-            
-            return await return_to_categories(update, context)
+            if file_manager.upload_file(file_path, temp_file_path):
+                file_manager.log_activity(DB_NAME, device_id, "UPLOAD", file_path)
+                
+                await update.message.reply_text(f"✅ Fichier {file_name} téléchargé avec succès sur MEGA.")
+                
+                # Supprimer le fichier temporaire
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                
+                return await return_to_categories(update, context)
+            else:
+                await update.message.reply_text("❌ Échec de l'upload du fichier sur MEGA.")
+                if os.path.exists(temp_file_path):
+                    os.remove(temp_file_path)
+                return FILE_OPERATION
         
         await update.message.reply_text("❌ Format de fichier non reconnu. Veuillez envoyer un document.")
         return FILE_OPERATION
@@ -573,6 +594,7 @@ async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document=open(filename, 'rb'),
                 filename=f"{target_id}_logs.csv"
             )
+            os.remove(filename)
         elif format_type == "pdf":
             filename = report_generator.generate_pdf(DB_NAME, target_id)
             await context.bot.send_document(
@@ -580,6 +602,7 @@ async def export_logs(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 document=open(filename, 'rb'),
                 filename=f"{target_id}_report.pdf"
             )
+            os.remove(filename)
         else:
             await update.message.reply_text("❌ Format non supporté. Utilisez 'csv' ou 'pdf'.")
             return
