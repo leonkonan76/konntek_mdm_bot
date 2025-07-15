@@ -30,7 +30,7 @@ def generate_pdf_report(logs, device_id, data_path):
         c.drawString(100, 750, f"Rapport des logs pour le numéro {device_id}")
         y = 700
         for log in logs:
-            text = f"ID: {log[0]}, User: {log[1]}, Numéro: {log[2]}, Category: {log[3]}, Subcategory: {log[4]}, Action: {log[5]}, Time: {log[6]}"
+            text = f"ID: {log[0]}, User: {log[1]}, Numéro: {log[2]}, Category: {log[3] or 'N/A'}, Subcategory: {log[4] or 'N/A'}, Action: {log[5]}, Time: {log[6]}"
             c.drawString(50, y, text)
             y -= 20
             if y < 50:
