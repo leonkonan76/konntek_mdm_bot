@@ -1,78 +1,73 @@
-# report_generator.py
-import csv
 import sqlite3
+import csv
+import os
+from datetime import datetime
+import pandas as pd
+import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
-from config import DB_NAME
+from reportlab.pdfgen import canvas
 
 def generate_csv(db_name, device_id):
-    """Génère un rapport CSV des logs"""
-    filename = f"{device_id}_logs.csv"
+    """Génère un rapport CSV pour un appareil spécifique"""
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
-    c.execute("SELECT * FROM logs WHERE device_id=?", (device_id,))
     
-    with open(filename, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['ID', 'Device ID', 'Action', 'File Path', 'Timestamp'])
-        writer.writerows(c.fetchall())
+    c.execute("SELECT * FROM logs WHERE device_id = ?", (device_id,))
+    logs = c.fetchall()
+    
+    filename = f"logs_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    with open(filename, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['ID', 'User ID', 'Device ID', 'Action', 'File Path', 'Timestamp'])
+        for log in logs:
+            writer.writerow(log)
     
     conn.close()
     return filename
 
 def generate_pdf(db_name, device_id):
-    """Génère un rapport PDF des logs"""
-    filename = f"{device_id}_report.pdf"
+    """Génère un rapport PDF pour un appareil spécifique"""
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
-    c.execute("SELECT * FROM logs WHERE device_id=?", (device_id,))
+    
+    c.execute("SELECT * FROM logs WHERE device_id = ?", (device_id,))
     logs = c.fetchall()
-    conn.close()
     
-    doc = SimpleDocTemplate(filename, pagesize=letter)
-    styles = getSampleStyleSheet()
-    story = [Paragraph(f"Rapport d'activité pour {device_id}", styles['Title'])]
-    
+    filename = f"report_{device_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+    c = canvas.Canvas(filename, pagesize=letter)
+    c.drawString(100, 750, f"Rapport pour l'appareil {device_id}")
+    y = 700
     for log in logs:
-        story.append(Paragraph(
-            f"{log[4]}: {log[2]} - {log[3] or 'Aucun fichier'}", 
-            styles['BodyText']
-        ))
+        c.drawString(100, y, f"{log[0]} | {log[1]} | {log[2]} | {log[3]} | {log[4]} | {log[5]}")
+        y -= 20
+        if y < 50:
+            c.showPage()
+            y = 750
+    c.save()
     
-    doc.build(story)
+    conn.close()
     return filename
 
 def generate_dashboard(db_name):
-    """Génère un tableau de bord textuel des activités des utilisateurs"""
+    """Génère un tableau de bord textuel avec des statistiques"""
     conn = sqlite3.connect(db_name)
     c = conn.cursor()
     
-    # Récupérer les utilisateurs uniques
-    c.execute("SELECT DISTINCT user_id FROM user_access")
-    users = c.fetchall()
+    c.execute("SELECT COUNT(DISTINCT device_id) FROM devices")
+    total_devices = c.fetchone()[0]
     
-    dashboard = ["📊 Tableau de bord des utilisateurs"]
+    c.execute("SELECT COUNT(*) FROM logs")
+    total_logs = c.fetchone()[0]
     
-    for user in users:
-        user_id = user[0]
-        c.execute(
-            "SELECT action, timestamp FROM user_access WHERE user_id=? ORDER BY timestamp DESC LIMIT 5",
-            (user_id,)
-        )
-        user_logs = c.fetchall()
-        
-        dashboard.append(f"\n👤 Utilisateur ID: {user_id}")
-        for log in user_logs:
-            action = log[0]
-            timestamp = log[1]
-            if action.startswith("DEVICE_ACCESS:"):
-                device_id = action.split(":")[1]
-                dashboard.append(f"  - {timestamp}: Accès au numéro {device_id}")
-            elif action == "LOGIN_SUCCESS":
-                dashboard.append(f"  - {timestamp}: Connexion réussie")
-            elif action == "LOGIN_FAILED":
-                dashboard.append(f"  - {timestamp}: Tentative de connexion échouée")
+    c.execute("SELECT device_id, COUNT(*) as count FROM logs GROUP BY device_id ORDER BY count DESC LIMIT 5")
+    top_devices = c.fetchall()
+    
+    dashboard = f"📊 Tableau de bord\n\n"
+    dashboard += f"Nombre total d'appareils: {total_devices}\n"
+    dashboard += f"Nombre total d'actions: {total_logs}\n\n"
+    dashboard += "Top 5 appareils par activité:\n"
+    for device, count in top_devices:
+        dashboard += f"- {device}: {count} actions\n"
     
     conn.close()
-    return "\n".join(dashboard) if dashboard else "ℹ️ Aucun log utilisateur disponible."
+    return dashboard
